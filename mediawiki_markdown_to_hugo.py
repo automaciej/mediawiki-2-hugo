@@ -328,7 +328,12 @@ if __name__ == '__main__':
     for doc in documents.values():
       doc.content = doc.content.replace(path, dest_path)
 
-  by_path = {d.path: d for d in documents.values()}
+  by_path: Dict[str, Document] = {}
+  for doc in documents.values():
+    assert doc.path not in by_path
+    by_path[doc.path] = doc
+    if doc.path.lower() not in by_path:
+      by_path[doc.path.lower()] = doc
 
   for doc in documents.values():
     updated_content: str = doc.fm.ToString() + (doc.RemoveCategoryLinks()
