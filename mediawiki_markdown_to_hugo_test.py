@@ -94,6 +94,25 @@ wikilinks: ['Another_article']
 """
     self.assertEqual(expected, fm.ToString())
 
+  def testRenderFrontMatterImages(self):
+    fm = m.FrontMatter(title="Test title 1", slug="test-title-1")
+    fm.wikilinks.append(m.Wikilink("Another article", "Another_article"))
+    fm.categories.append("test-category")
+    fm.image_paths = ["img1", "img2"]
+    expected = """---
+title: "Test title 1"
+slug: "test-title-1"
+date: 2005-01-01T00:00:00+01:00
+kategorie: ['test-category']
+draft: false
+wikilinks: ['Another_article']
+images:
+  - path: "img1"
+  - path: "img2"
+---
+"""
+    self.assertEqual(expected, fm.ToString())
+
   def testWikilinks(self):
     redirects = {}
     dest_doc = m.Document("", "content/książka/Modulatory_i_filtry_dźwięku.md")
@@ -166,10 +185,18 @@ wikilinks: ['Another_article']
     doc = m.Document(
       '[thumb\nnail](Grafika:MarekBlizinskiPozycja.jpg "wikilink") - postawa z',
       'foo/bar.md')
-    self.assertEqual("/images/MarekBlizinskiPozycja.jpg", doc.fm.image_path)
+    self.assertEqual(["/images/MarekBlizinskiPozycja.jpg"], doc.fm.image_paths)
     self.assertEqual(
       '{{< figure src="/images/MarekBlizinskiPozycja.jpg" >}} - postawa z',
       doc.HandleImageTags().content)
+
+  def testHandleImageTagsMultipleImages(self):
+    m.IMAGE_TAG = 'grafika'
+    doc = m.Document(
+      '[thumb\nnail](Grafika:MarekBlizinskiPozycja.jpg "wikilink") - postawa z'
+      '[somethingelse](Grafika:anotherImage.jpg "wikilink")',
+      'foo/bar.md')
+    self.assertEqual(["/images/MarekBlizinskiPozycja.jpg", "/images/AnotherImage.jpg"], doc.fm.image_paths)
 
 
 if __name__ == '__main__':

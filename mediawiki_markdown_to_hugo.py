@@ -68,7 +68,7 @@ class FrontMatter:
   wikilinks: List[Wikilink] = field(init=False, default_factory=list)
   redirect: Optional[str] = field(init=False, default=None)
   aliases: List[str] = field(init=False, default_factory=list)
-  image_path: Optional[str] = field(init=False, default=None)
+  image_paths: List[str] = field(init=False, default_factory=list)
 
   def ToString(self) -> str:
     wiki_destinations = [f"{wl.destination}" for wl in self.wikilinks]
@@ -77,8 +77,9 @@ class FrontMatter:
       aliases_text = f"aliases: {self.aliases}\n"
     else:
       aliases_text = ""
-    if self.image_path:
-      image_text = f"\nimage:\n  path: \"{self.image_path}\"\n"
+    if self.image_paths:
+      image_text = "images:\n" + "\n".join([f"  - path: \"{x}\"" for x in
+                                            self.image_paths]) + "\n"
     else:
       image_text = ""
     return f"""---
@@ -216,8 +217,8 @@ class Document:
     for m in re.finditer(image_pattern, self.content, flags=re.IGNORECASE):
       # Use first found image as the entry image.
       # TODO: Deduplicate the image path.
-      fm.image_path = "/images/" + m.group(1)[0].upper() + m.group(1)[1:]
-      break
+      image_path = "/images/" + m.group(1)[0].upper() + m.group(1)[1:]
+      fm.image_paths.append(image_path)
     return fm
 
   def URLPath(self):
