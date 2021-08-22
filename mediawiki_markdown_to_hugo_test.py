@@ -117,6 +117,7 @@ wikilinks: ['Another_article']
     self.assertEqual(dst, doc.TryToFixWikilinks(by_path, redirects).content)
 
   def testRemoveCategoryLinks(self):
+    m.CATEGORY_TAG = 'kategoria'
     doc = m.Document(
       'head[kategoria:technika gry](# "Niestety nic nie ma pod '
       'tym linkiem")tail', 'content/książka/foo.md')

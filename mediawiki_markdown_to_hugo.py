@@ -154,8 +154,8 @@ class Document:
                     self.path)
 
   def RemoveCategoryLinks(self) -> 'Document':
-    pattern = '\[:?[Kk]ategoria:[^\]]+\]\([^\)]+\)'
-    return Document(re.sub(pattern, '', self.content), self.path)
+    pattern = '\[:?' + CATEGORY_TAG + ':[^\]]+\]\([^\)]+\)'
+    return Document(re.sub(pattern, '', self.content, flags=re.IGNORECASE), self.path)
 
 
   def RemoveGraphicsTags(self) -> 'Document':
@@ -194,8 +194,11 @@ class Document:
         anchor = node.first_child.literal
         url = node.destination
         title = node.title
-        if anchor.startswith(f'{CATEGORY_TAG}:'):
-          category = anchor.replace(f"{CATEGORY_TAG}:", "")
+        category_pat = f"({CATEGORY_TAG}:)"
+        m = re.match(category_pat, anchor, flags=re.IGNORECASE)
+        if m:
+          category = re.sub(category_pat, "", anchor,
+                            flags=re.IGNORECASE).capitalize()
           fm.categories.append(category)
         elif title == "wikilink":
           fm.wikilinks.append(Wikilink(anchor, url))
