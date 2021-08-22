@@ -65,6 +65,9 @@ class ConversionTest(unittest.TestCase):
   def testSlugifyUnder(self):
     self.assertEqual("foo-bar", m.Slugify("foo_bar"))
 
+  def testSlugifyEndings(self):
+    self.assertEqual("foo-bar", m.Slugify("(foo_bar)"))
+
   def testRenderFrontMatter(self):
     fm = m.FrontMatter(title="Test title 1", slug="test-title-1")
     fm.wikilinks.append(m.Wikilink("Another article", "Another_article"))

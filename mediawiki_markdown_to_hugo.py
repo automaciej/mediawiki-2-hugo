@@ -242,7 +242,7 @@ def Slugify(s: str) -> str:
   no_under = s.replace('_', ' ')
   lowercased = no_under.lower()
   segments = re.split("[^\w]+", lowercased)
-  return "-".join(segments)
+  return ("-".join(segments)).strip('-')
 
 
 def NoDiacriticsSlugify(s: str) -> str:
