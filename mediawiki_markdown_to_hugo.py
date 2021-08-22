@@ -40,7 +40,7 @@ import unidecode
 
 
 # Language dependent
-CATEGORY_TAG = "kategoria"
+CATEGORY_TAG = "Category"
 BACKUP_EXT = ".orig"
 
 
@@ -284,7 +284,13 @@ if __name__ == '__main__':
   parser.add_argument(
       "content_directory", metavar="PATH",
       help="Content directory, usually named 'content'.")
+  parser.add_argument(
+    "--category-tag", metavar="TAG", default="Category",
+    help="Name of the Category tag in Mediawiki. This tends to be "
+         "language-dependent. Non-English Mediawiki instances will use "
+         "different words, like Catégorie or Kategoria.")
   args = parser.parse_args()
+  CATEGORY_TAG = args.category_tag
   logging.basicConfig(level=logging.INFO)
   # TODO: Make this script work from other locations tool.
   assert args.content_directory == 'content', (
