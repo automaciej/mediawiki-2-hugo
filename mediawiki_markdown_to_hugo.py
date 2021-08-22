@@ -41,6 +41,7 @@ import unidecode
 
 # Language dependent
 CATEGORY_TAG = "Category"
+IMAGE_TAG = "Graphics"
 BACKUP_EXT = ".orig"
 
 
@@ -153,13 +154,16 @@ class Document:
     pattern = '\[:?' + CATEGORY_TAG + ':[^\]]+\]\([^\)]+\)'
     return Document(re.sub(pattern, '', self.content, flags=re.IGNORECASE), self.path)
 
-  def RemoveGraphicsTags(self) -> 'Document':
-    pattern = '\[:?[Gg]rafika:[^\]]+\]\([^\)]+\)'
-    return Document(re.sub(pattern, '', self.content), self.path)
-
-  def RemoveThumbs(self) -> 'Document':
-    pattern = '\[thumb\]\([^\)]+\)'
-    return Document(re.sub(pattern, '', self.content), self.path)
+  def ReplaceGraphicsTags(self) -> 'Document':
+    pattern = '\[[^\]]+\]\(' + IMAGE_TAG + ':([^\s]+)\s"wikilink"\)'
+    def repl(m):
+      # Image path is always capitalized in MediaWiki, and works even if you
+      # don't capitalize it in page text.
+      image_path = "/images/" + m.group(1)[0].upper() + m.group(1)[1:]
+      return '{{< figure src="' + image_path + '" >}}'
+    return Document(re.sub(pattern, repl, self.content, flags=re.IGNORECASE |
+                           re.MULTILINE),
+                    self.path)
 
   def GetRedirect(self) -> Optional[str]:
     """If the document is a redirection, return the destination."""
@@ -278,8 +282,12 @@ if __name__ == '__main__':
     help="Name of the Category tag in Mediawiki. This tends to be "
          "language-dependent. Non-English Mediawiki instances will use "
          "different words, like Catégorie or Kategoria.")
+  parser.add_argument(
+    "--image-tag", metavar="TAG", default="File",
+    help="Name of the Image tag in Mediawiki.")
   args = parser.parse_args()
   CATEGORY_TAG = args.category_tag
+  IMAGE_TAG = args.image_tag
   logging.basicConfig(level=logging.INFO)
   # TODO: Make this script work from other locations tool.
   assert args.content_directory == 'content', (
@@ -337,9 +345,8 @@ if __name__ == '__main__':
 
   for doc in documents.values():
     updated_content: str = doc.fm.ToString() + (doc.RemoveCategoryLinks()
-                          .RemoveGraphicsTags()
+                          .ReplaceGraphicsTags()
                           .TryToFixWikilinks(by_path, redirects)
-                          .RemoveThumbs()
                           .content)
 
     WriteContent(updated_content, doc.path)
