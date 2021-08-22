@@ -123,23 +123,19 @@ class Document:
         doc = None
         while p in redirects and redirects[p] in by_path:
           doc = by_path[redirects[p]]
-          logging.warning("Found a redirect: %r => %r", p, redirects[p])
           p = doc.path
         return doc
       target_doc = ResolveRedirect(dest_path)
       if target_doc is not None:
-        logging.info("Applying redirection from %r to %r",
-                     dest_path, target_doc.path)
         dest_name = target_doc.fm.title.replace(' ', '_')
       elif dest_path in by_path and by_path[dest_path].GetRedirect():
         target_doc = by_path[dest_path]
         after_redirection = ResolveRedirect(target_doc.path)
         if after_redirection is None:
-          logging.warning("But %r will be deleted", target_doc.path)
+          logging.warning("%r wants to redirect to %r, but %r will be deleted",
+                          dest_path, target_doc.path, target_doc.path)
           return annotate_invalid(anchor)
         else:
-          # I think this can never work. We only enter this branch when the
-          # redirection is not valid.
           target_doc = after_redirection
           dest_name = target_doc.fm.title.replace(' ', '_') + '.md'
       elif dest_path in by_path:
@@ -156,7 +152,6 @@ class Document:
   def RemoveCategoryLinks(self) -> 'Document':
     pattern = '\[:?' + CATEGORY_TAG + ':[^\]]+\]\([^\)]+\)'
     return Document(re.sub(pattern, '', self.content, flags=re.IGNORECASE), self.path)
-
 
   def RemoveGraphicsTags(self) -> 'Document':
     pattern = '\[:?[Gg]rafika:[^\]]+\]\([^\)]+\)'
@@ -330,7 +325,6 @@ if __name__ == '__main__':
   # Now that we're unlinking documents, we need to replace the references to
   # redirects in existing documents. For each document, for each reference, N*M.
   for path, destination in redirects.items():
-    logging.info("Redirection: %s to %s", path, destination)
     for doc in documents.values():
       doc.content = doc.content.replace(path, dest_path)
 
@@ -346,5 +340,4 @@ if __name__ == '__main__':
     WriteContent(updated_content, doc.path)
 
   for path in redirects:
-    logging.info("Unlinking %s", path)
     os.unlink(path)
