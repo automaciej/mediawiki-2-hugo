@@ -148,6 +148,15 @@ class Document:
       elif dest_path in by_path:
         target_doc = by_path[dest_path]
         dest_name = target_doc.fm.title.replace(' ', '_') + '.md'
+      elif re.match(':'+CATEGORY_TAG+':', dest, flags=re.IGNORECASE):
+        m = re.search(':'+CATEGORY_TAG+':(?P<category>.*)', dest, re.IGNORECASE)
+        if m is None:
+          return annotate_invalid(anchor)
+        category = m['category']
+        # TODO: Customize the category URL path from "kategorie"
+        slug = Slugify(category)
+        return "[%s](/kategorie/%s \"Kategoria %s\")" % (
+          anchor, slug, category.replace("_", " "))
       else:
         logging.debug("%r (%r) links to %r (%r) and that does not exist",
                       self.fm.title, self.path, dest, dest_path)
@@ -230,8 +239,9 @@ class Document:
 
 
 def Slugify(s: str) -> str:
-  lowercased = s.lower()
-  segments = re.split("\s+", lowercased)
+  no_under = s.replace('_', ' ')
+  lowercased = no_under.lower()
+  segments = re.split("[^\w]+", lowercased)
   return "-".join(segments)
 
 
@@ -335,15 +345,20 @@ if __name__ == '__main__':
   redirects: Dict[str, str] = {}
   # Need to find the redirects, and assign aliases.
   for wiki_name, doc in documents.items():
-    if doc.fm.redirect is not None:
-      if doc.fm.redirect in documents:
-        documents[doc.fm.redirect].fm.aliases.append(doc.URLPath())
-        # The target in the dictionary should be the path of the .md file.
-        doc_dir, _ = os.path.split(doc.path)
-        dest_path = os.path.join(doc_dir, doc.fm.redirect + ".md")
-        redirects[doc.path] = dest_path
-      else:
-        logging.warning(f"Bad redirect: {doc.fm.redirect}")
+    if doc.fm.redirect is None:
+      continue
+    if doc.fm.redirect in documents:
+      documents[doc.fm.redirect].fm.aliases.append(doc.URLPath())
+      # The target in the dictionary should be the path of the .md file.
+      doc_dir, _ = os.path.split(doc.path)
+      dest_path = os.path.join(doc_dir, doc.fm.redirect + ".md")
+      redirects[doc.path] = dest_path
+    elif re.match(':'+CATEGORY_TAG+':', doc.fm.redirect,
+                     flags=re.IGNORECASE):
+      # TODO: A redirection to a category page.
+      logging.warning(f"Redirection to a category page: {doc.fm.redirect!r}")
+    else:
+      logging.warning(f"Bad redirect: {doc.fm.redirect!r}")
 
   # Now that we're unlinking documents, we need to replace the references to
   # redirects in existing documents. For each document, for each reference, N*M.

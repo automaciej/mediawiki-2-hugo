@@ -62,6 +62,9 @@ class ConversionTest(unittest.TestCase):
       "szła-dzieweczka-do-laseczka",
       m.Slugify("Szła dzieweczka do laseczka"))
 
+  def testSlugifyUnder(self):
+    self.assertEqual("foo-bar", m.Slugify("foo_bar"))
+
   def testRenderFrontMatter(self):
     fm = m.FrontMatter(title="Test title 1", slug="test-title-1")
     fm.wikilinks.append(m.Wikilink("Another article", "Another_article"))
@@ -135,6 +138,19 @@ images:
            '({{< relref "Bossa_Nova_\(akompaniament\).md" >}})')
     self.assertEqual(dst, doc.TryToFixWikilinks(by_path, redirects).content)
 
+  def testWikilinksCategory(self):
+    m.CATEGORY_TAG = "kategoria"
+    redirects = {}
+    dest_doc = m.Document(
+      "", "content/książka/Bossa_Nova_\\(akompaniament\\).md")
+    doc = m.Document('[some anchor](:Kategoria:Tabele_chwytów "wikilink") a',
+                     'content/książka/foo.md')
+    by_path = {m.path: m for m in (dest_doc, doc)}
+    dst = ('[some anchor]'
+           '(/kategorie/tabele-chwytów "Kategoria Tabele chwytów")'
+           ' a')
+    self.assertEqual(dst, doc.TryToFixWikilinks(by_path, redirects).content)
+
   def testRemoveCategoryLinks(self):
     m.CATEGORY_TAG = 'kategoria'
     doc = m.Document(
@@ -160,8 +176,8 @@ images:
       '1.  REDIRECT [C9sus](C9sus "wikilink")',
       'content/książka/B♭/C.md')
     self.assertEqual("C9sus", doc.GetRedirect())
-    self.assertEqual("b♭/c", doc.fm.slug)
-    self.assertEqual("książka/b♭/c", doc.URLPath())
+    self.assertEqual("b-c", doc.fm.slug)
+    self.assertEqual("książka/b-c", doc.URLPath())
 
   def testHandleImageTags(self):
     m.IMAGE_TAG = 'grafika'
@@ -196,7 +212,8 @@ images:
       '[thumb\nnail](Grafika:MarekBlizinskiPozycja.jpg "wikilink") - postawa z'
       '[somethingelse](Grafika:anotherImage.jpg "wikilink")',
       'foo/bar.md')
-    self.assertEqual(["/images/MarekBlizinskiPozycja.jpg", "/images/AnotherImage.jpg"], doc.fm.image_paths)
+    self.assertEqual(["/images/MarekBlizinskiPozycja.jpg",
+                      "/images/AnotherImage.jpg"], doc.fm.image_paths)
 
 
 if __name__ == '__main__':
