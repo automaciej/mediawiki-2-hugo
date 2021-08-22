@@ -68,6 +68,7 @@ class FrontMatter:
   wikilinks: List[Wikilink] = field(init=False, default_factory=list)
   redirect: Optional[str] = field(init=False, default=None)
   aliases: List[str] = field(init=False, default_factory=list)
+  image_path: Optional[str] = field(init=False, default=None)
 
   def ToString(self) -> str:
     wiki_destinations = [f"{wl.destination}" for wl in self.wikilinks]
@@ -76,6 +77,10 @@ class FrontMatter:
       aliases_text = f"aliases: {self.aliases}\n"
     else:
       aliases_text = ""
+    if self.image_path:
+      image_text = f"\nimage:\n  path: \"{self.image_path}\"\n"
+    else:
+      image_text = ""
     return f"""---
 title: "{self.title}"
 slug: "{self.slug}"
@@ -83,7 +88,7 @@ date: {self.date}
 kategorie: {self.categories}
 draft: false
 {wikilinks_text}
-{aliases_text}---
+{aliases_text}{image_text}---
 """
 
 
@@ -154,15 +159,16 @@ class Document:
     pattern = '\[:?' + CATEGORY_TAG + ':[^\]]+\]\([^\)]+\)'
     return Document(re.sub(pattern, '', self.content, flags=re.IGNORECASE), self.path)
 
-  def ReplaceGraphicsTags(self) -> 'Document':
-    pattern = '\[[^\]]+\]\(' + IMAGE_TAG + ':([^\s]+)\s"wikilink"\)'
+  def HandleImageTags(self) -> 'Document':
+    # TODO: Dedup image pattern.
+    image_pattern = '\[[^\]]+\]\(' + IMAGE_TAG + ':([^\s]+)\s"wikilink"\)'
     def repl(m):
       # Image path is always capitalized in MediaWiki, and works even if you
       # don't capitalize it in page text.
       image_path = "/images/" + m.group(1)[0].upper() + m.group(1)[1:]
       return '{{< figure src="' + image_path + '" >}}'
-    return Document(re.sub(pattern, repl, self.content, flags=re.IGNORECASE |
-                           re.MULTILINE),
+
+    return Document(re.sub(image_pattern, repl, self.content, flags=re.IGNORECASE),
                     self.path)
 
   def GetRedirect(self) -> Optional[str]:
@@ -204,6 +210,14 @@ class Document:
         else:
           fm.links.append(Link(anchor, url, title))
     fm.redirect = self.GetRedirect()
+    # Identify images on the page.
+    # TODO: Dedup image pattern.
+    image_pattern = '\[[^\]]+\]\(' + IMAGE_TAG + ':([^\s]+)\s"wikilink"\)'
+    for m in re.finditer(image_pattern, self.content, flags=re.IGNORECASE):
+      # Use first found image as the entry image.
+      # TODO: Deduplicate the image path.
+      fm.image_path = "/images/" + m.group(1)[0].upper() + m.group(1)[1:]
+      break
     return fm
 
   def URLPath(self):
@@ -345,7 +359,7 @@ if __name__ == '__main__':
 
   for doc in documents.values():
     updated_content: str = doc.fm.ToString() + (doc.RemoveCategoryLinks()
-                          .ReplaceGraphicsTags()
+                          .HandleImageTags()
                           .TryToFixWikilinks(by_path, redirects)
                           .content)
 

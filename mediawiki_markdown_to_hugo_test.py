@@ -144,31 +144,32 @@ wikilinks: ['Another_article']
     self.assertEqual("b♭/c", doc.fm.slug)
     self.assertEqual("książka/b♭/c", doc.URLPath())
 
-  def testHandleGraphicsTags(self):
+  def testHandleImageTags(self):
     m.IMAGE_TAG = 'grafika'
     doc = m.Document(
       '[thumb](Grafika:MarekBlizinskiPozycja.jpg "wikilink") - postawa z',
       'foo/bar.md')
     self.assertEqual(
       '{{< figure src="/images/MarekBlizinskiPozycja.jpg" >}} - postawa z',
-      doc.ReplaceGraphicsTags().content)
+      doc.HandleImageTags().content)
 
-  def testHandleGraphicsTagsLowercase(self):
+  def testHandleImageTagsLowercase(self):
     m.IMAGE_TAG = 'grafika'
     doc = m.Document(
       '[thumb](Grafika:plectrum1.jpg "wikilink") - postawa z',
       'foo/bar.md')
     self.assertEqual('{{< figure src="/images/Plectrum1.jpg" >}} - postawa z',
-                     doc.ReplaceGraphicsTags().content)
+                     doc.HandleImageTags().content)
 
-  def testHandleGraphicsTagsMultiline(self):
+  def testHandleImageTagsMultiline(self):
     m.IMAGE_TAG = 'grafika'
     doc = m.Document(
       '[thumb\nnail](Grafika:MarekBlizinskiPozycja.jpg "wikilink") - postawa z',
       'foo/bar.md')
+    self.assertEqual("/images/MarekBlizinskiPozycja.jpg", doc.fm.image_path)
     self.assertEqual(
       '{{< figure src="/images/MarekBlizinskiPozycja.jpg" >}} - postawa z',
-      doc.ReplaceGraphicsTags().content)
+      doc.HandleImageTags().content)
 
 
 if __name__ == '__main__':
