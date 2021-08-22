@@ -87,6 +87,16 @@ It's working but far from perfect. Lot's of stuff are not handled as you can see
 - **Slug**: I took the page's name from MediaWiki (which is the title with spaces substituted by underscores) as files name. So in the end of the url remain the same.
 - **Front matters of theme**: In the theme I plan to use ([Tranquilpeak](https://github.com/kakawait/hugo-tranquilpeak-theme/)) I don't saw any interesting attribute that could be fed with data from the MediaWiki.
 
+## Additional tools ##
+
+### Plain Markdown and Github flavored markdown files ###
+
+If you have markdown files converted from MediaWiki to Github flavored
+Markdown, you can't use them with Hugo because they lack front matter.  You can
+use `mediawiki_markdown_to_hugo.py` to generate front matter. The script will
+also clean up a few types of problems in the code. The functionality overlaps
+with `mediawiki-2-hugo.sh`, but it works from files rather connecting to a
+MediaWiki database.
 
 ### Notes ###
 
