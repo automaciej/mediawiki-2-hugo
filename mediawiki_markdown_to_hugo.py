@@ -166,21 +166,12 @@ class Document:
     pattern = '\[thumb\]\([^\)]+\)'
     return Document(re.sub(pattern, '', self.content), self.path)
 
-  BAD_REDIRECTS = set([
-    ":kategoria:Akordy_durowe",
-    ":Kategoria:Rodzaje_gitar",
-    "II-V-I_\(dwa_pięć_jeden\)",
-  ])
   def GetRedirect(self) -> Optional[str]:
     """If the document is a redirection, return the destination."""
     anchor_pat = '\[(?P<anchor>[^\]]+)\]'
     redir_pat = 'REDIRECT\\s+' + anchor_pat + '\((?P<dest>[^\s]+) "wikilink"\)'
     m = re.search(redir_pat, self.content)
-    if m:
-      redirect = m['dest']
-      if redirect not in self.BAD_REDIRECTS:
-        return redirect
-    return None
+    return m['dest'] if m else None
 
   def MakeFrontMatter(self) -> FrontMatter:
     title = TitleFromPath(self.path)
