@@ -37,6 +37,7 @@ import re
 import shutil
 import toml
 import unidecode
+import urllib.parse
 
 
 # Language dependent
@@ -209,11 +210,11 @@ class Document:
         anchor = node.first_child.literal
         url = node.destination
         title = node.title
-        category_pat = f"({CATEGORY_TAG}:)"
-        m = re.match(category_pat, anchor, flags=re.IGNORECASE)
+        category_pat = f"{CATEGORY_TAG}:(?P<category>.*)"
+        m = re.search(category_pat, url, flags=re.IGNORECASE)
         if m:
-          category = re.sub(category_pat, "", anchor,
-                            flags=re.IGNORECASE).capitalize()
+          category = (urllib.parse.unquote_plus(m['category'])
+                      .replace('_', ' ').capitalize())
           fm.categories.append(category)
         elif title == "wikilink":
           fm.wikilinks.append(Wikilink(anchor, url))

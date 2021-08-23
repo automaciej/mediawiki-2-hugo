@@ -154,6 +154,13 @@ images:
            ' a')
     self.assertEqual(dst, doc.TryToFixWikilinks(by_path, redirects).content)
 
+  def testCategory(self):
+    m.CATEGORY_TAG = "kategoria"
+    doc = m.Document('[Pass, Joe](kategoria:gitarzyści_jazzowi "wikilink")',
+                     'content/książka/foo.md')
+    by_path = {m.path: m for m in (doc,)}
+    self.assertIn("Gitarzyści jazzowi", doc.fm.categories)
+
   def testRemoveCategoryLinks(self):
     m.CATEGORY_TAG = 'kategoria'
     doc = m.Document(
