@@ -73,21 +73,21 @@ class FrontMatter:
 
   def ToString(self) -> str:
     wiki_destinations = [f"{wl.destination}" for wl in self.wikilinks]
-    wikilinks_text = f"wikilinks: {wiki_destinations}"
+    wikilinks_text = f"wikilinks: {sorted(wiki_destinations)}"
     if self.aliases:
-      aliases_text = f"aliases: {self.aliases}\n"
+      aliases_text = f"aliases: {sorted(self.aliases)}\n"
     else:
       aliases_text = ""
     if self.image_paths:
       image_text = "images:\n" + "\n".join([f"  - path: \"{x}\"" for x in
-                                            self.image_paths]) + "\n"
+                                            sorted(self.image_paths)]) + "\n"
     else:
       image_text = ""
     return f"""---
 title: "{self.title}"
 slug: "{self.slug}"
 date: {self.date}
-kategorie: {self.categories}
+kategorie: {sorted(self.categories)}
 draft: false
 {wikilinks_text}
 {aliases_text}{image_text}---
