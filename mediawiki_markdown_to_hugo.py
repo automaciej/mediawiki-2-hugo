@@ -25,7 +25,7 @@ The reason is quite funny: What `find` gets in argv is `mv -f {} {}` because the
 "$( ... )" block gets executed by shell before `find` has a chance to see it.
 """
 
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
 
 import argparse
@@ -291,7 +291,17 @@ def MarkdownPaths(dirname: str) -> Tuple[Set[str], Set[str]]:
   return file_list, backup_file_list
 
 
-def TitleFromPath(path:str ) -> str:
+def DocumentsByPath(documents: Iterable[Document]) -> Dict[str, Document]:
+  by_path: Dict[str, Document] = {}
+  for doc in documents:
+    assert doc.path not in by_path
+    by_path[doc.path] = doc
+    if doc.path.lower() not in by_path:
+      by_path[doc.path.lower()] = doc
+  return by_path
+
+
+def TitleFromPath(path: str) -> str:
   "Derive the title from path."
   parts = path.split("/")
   skippedtwo = '/'.join(parts[2:])
@@ -369,12 +379,7 @@ if __name__ == '__main__':
     for doc in documents.values():
       doc.content = doc.content.replace(path, dest_path)
 
-  by_path: Dict[str, Document] = {}
-  for doc in documents.values():
-    assert doc.path not in by_path
-    by_path[doc.path] = doc
-    if doc.path.lower() not in by_path:
-      by_path[doc.path.lower()] = doc
+  by_path: Dict[str, Document] = DocumentsByPath(documents.values())
 
   for doc in documents.values():
     updated_content: str = doc.fm.ToString() + (doc.RemoveCategoryLinks()
