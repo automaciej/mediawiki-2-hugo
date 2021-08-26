@@ -117,8 +117,6 @@ class Document:
     anchor_pat = '\[(?P<anchor>[^\]]+)\]'
     identify_pat = anchor_pat + '\((?P<dest>[^\s]+) "wikilink"\)'
     def repl(m) -> str:
-      def annotate_invalid(s: str) -> str:
-        return f"{s}<!-- link nie odnosił się do niczego -->"
       dest = m['dest']
       anchor = m['anchor']
       # We've found a destination, does it exist on disk?
@@ -127,6 +125,10 @@ class Document:
       # setup.
       doc_dir, _ = os.path.split(self.path)
       dest_path = os.path.join(doc_dir, dest + ".md")
+      def annotate_invalid(s: str, reason: str) -> str:
+        logging.info("Could not fix link [%r](%r) in %r: %s", anchor, dest,
+                     self.path, reason)
+        return f"{s}<!-- link nie odnosił się do niczego: {reason} -->"
       def ResolveRedirect(p: str) -> Optional[Document]:
         doc = None
         while p in redirects and redirects[p] in by_path:
@@ -140,9 +142,9 @@ class Document:
         target_doc = by_path[dest_path]
         after_redirection = ResolveRedirect(target_doc.path)
         if after_redirection is None:
-          logging.warning("%r wants to redirect to %r, but %r will be deleted",
-                          dest_path, target_doc.path, target_doc.path)
-          return annotate_invalid(anchor)
+          msg = ("%r wants to redirect to %r, but %r will be deleted" % (
+                 dest_path, target_doc.path, target_doc.path))
+          return annotate_invalid(anchor, msg)
         else:
           target_doc = after_redirection
           dest_name = target_doc.fm.title.replace(' ', '_') + '.md'
@@ -150,18 +152,18 @@ class Document:
         target_doc = by_path[dest_path]
         dest_name = target_doc.fm.title.replace(' ', '_') + '.md'
       elif re.match(':'+CATEGORY_TAG+':', dest, flags=re.IGNORECASE):
-        m = re.search(':'+CATEGORY_TAG+':(?P<category>.*)', dest, re.IGNORECASE)
+        m = re.search(':'+CATEGORY_TAG+':(?P<category>.*):?', dest, re.IGNORECASE)
         if m is None:
-          return annotate_invalid(anchor)
+          return annotate_invalid(anchor, "Could not find the category tag")
         category = m['category']
         # TODO: Customize the category URL path from "kategorie"
         slug = Slugify(category)
         return "[%s](/kategorie/%s \"Kategoria %s\")" % (
           anchor, slug, category.replace("_", " "))
       else:
-        logging.debug("%r (%r) links to %r (%r) and that does not exist",
-                      self.fm.title, self.path, dest, dest_path)
-        return annotate_invalid(anchor)
+        msg = ("%r (%r) links to %r (%r) and that does not exist" % (
+          self.fm.title, self.path, dest, dest_path))
+        return annotate_invalid(anchor, msg)
       return '[%s]({{< relref "%s" >}})' % (anchor, dest_name)
     return Document(re.sub(identify_pat, repl, self.content),
                     self.path)
@@ -196,11 +198,11 @@ class Document:
     if ast is None:
       raise Exception("Parsing failed?")
     fm = FrontMatter(title=title, slug=Slugify(title))
-    # ast.walker seems to visit some nodes more than once.
-    # This is surprising.
     bald_slug = NoDiacriticsSlugify(title)
     if bald_slug != fm.slug:
       fm.aliases.append(bald_slug)
+    # ast.walker seems to visit some nodes more than once.
+    # This is surprising.
     already_seen = set()
     for node, unused_entering in ast.walker():
       if node in already_seen:
@@ -357,7 +359,7 @@ if __name__ == '__main__':
     elif re.match(':'+CATEGORY_TAG+':', doc.fm.redirect,
                      flags=re.IGNORECASE):
       # TODO: A redirection to a category page.
-      logging.warning(f"Redirection to a category page: {doc.fm.redirect!r}")
+      logging.warning("%r tries to redirect to a category page: %r", doc.path, doc.fm.redirect)
     else:
       logging.warning(f"Bad redirect: {doc.fm.redirect!r}")
 
@@ -382,5 +384,7 @@ if __name__ == '__main__':
 
     WriteContent(updated_content, doc.path)
 
-  for path in redirects:
-    os.unlink(path)
+  for doc in documents.values():
+    if doc.fm.redirect:
+      logging.info("Unlinking %r because it's a redirection to %r", doc.path,
+                   doc.fm.redirect)
