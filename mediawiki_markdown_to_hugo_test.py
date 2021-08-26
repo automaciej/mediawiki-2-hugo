@@ -156,7 +156,24 @@ images:
            ' a')
     self.assertEqual(dst, doc.TryToFixWikilinks(by_path, redirects).content)
 
-  def testCategory(self):
+  def testWikilinksCategory(self):
+    m.CATEGORY_TAG = "kategoria"
+    redirects = {}
+    doc_akord = m.Document('O akordzie',
+                     'content/książka/Akord.md')
+    doc = m.Document('[akord](akord "wikilink")',
+                     'content/książka/foo.md')
+    by_path = m.DocumentsByPath((doc_akord, doc))
+    dst = ('[akord]({{< relref "Akord.md" >}})')
+    self.assertEqual(dst, doc.TryToFixWikilinks(by_path, redirects).content)
+
+  def testWikilinksCategoryWithSpaces(self):
+    m.CATEGORY_TAG = "kategoria"
+    doc = m.Document('[kategoria:technika gry](kategoria:technika_gry "wikilink")',
+                     'foo/Page_Title.md')
+    self.assertIn('Technika gry', doc.fm.categories)
+
+  def testCategoryWithDiacritics(self):
     m.CATEGORY_TAG = "kategoria"
     doc = m.Document('[Pass, Joe](kategoria:gitarzyści_jazzowi "wikilink")',
                      'content/książka/foo.md')
