@@ -38,6 +38,7 @@ import shutil
 import toml
 import unidecode
 import urllib.parse
+import xml.etree.ElementTree as ET
 
 
 # Language dependent
@@ -70,6 +71,9 @@ class FrontMatter:
   redirect: Optional[str] = field(init=False, default=None)
   aliases: List[str] = field(init=False, default_factory=list)
   image_paths: List[str] = field(init=False, default_factory=list)
+  # Metadata from Mediawiki XML export.
+  timestamp: Optional[str] = field(init=False, default="")
+  contributor: Optional[str] = field(init=False, default="")
 
   def ToString(self) -> str:
     wiki_destinations = [f"{wl.destination}" for wl in self.wikilinks]
@@ -83,15 +87,26 @@ class FrontMatter:
                                             sorted(self.image_paths)]) + "\n"
     else:
       image_text = ""
+    if self.contributor:
+      contributor = f"contributor: {self.contributor!r}\n"
+    else:
+      contributor = ""
     return f"""---
 title: "{self.title}"
 slug: "{self.slug}"
 date: {self.date}
 kategorie: {sorted(self.categories)}
 draft: false
-{wikilinks_text}
+{contributor}{wikilinks_text}
 {aliases_text}{image_text}---
 """
+
+
+@dataclass
+class MediawikiPage:
+  title: str
+  timestamp: str
+  contributor: str
 
 
 @dataclass
@@ -99,6 +114,7 @@ class Document:
   """Represents a Markdown document."""
   content: str
   path: str
+  mp: Optional[MediawikiPage]
   fm: FrontMatter = field(init=False, default_factory=lambda: FrontMatter("", ""))
 
   def __post_init__(self):
@@ -166,11 +182,12 @@ class Document:
         return annotate_invalid(anchor, msg)
       return '[%s]({{< relref "%s" >}})' % (anchor, dest_name)
     return Document(re.sub(identify_pat, repl, self.content),
-                    self.path)
+                    self.path, self.mp)
 
   def RemoveCategoryLinks(self) -> 'Document':
     pattern = '\[:?' + CATEGORY_TAG + ':[^\]]+\]\([^\)]+\)'
-    return Document(re.sub(pattern, '', self.content, flags=re.IGNORECASE), self.path)
+    return Document(re.sub(pattern, '', self.content, flags=re.IGNORECASE),
+                    self.path, self.mp)
 
   def HandleImageTags(self) -> 'Document':
     # TODO: Dedup image pattern.
@@ -182,7 +199,7 @@ class Document:
       return '{{< figure src="' + image_path + '" >}}'
 
     return Document(re.sub(image_pattern, repl, self.content, flags=re.IGNORECASE),
-                    self.path)
+                    self.path, self.mp)
 
   def GetRedirect(self) -> Optional[str]:
     """If the document is a redirection, return the destination."""
@@ -231,6 +248,12 @@ class Document:
       # TODO: Deduplicate the image path.
       image_path = "/images/" + m.group(1)[0].upper() + m.group(1)[1:]
       fm.image_paths.append(image_path)
+
+    # Metadata from Mediawiki
+    if self.mp:
+      fm.date = self.mp.timestamp
+      fm.contributor = self.mp.contributor
+
     return fm
 
   def URLPath(self):
@@ -252,7 +275,8 @@ def NoDiacriticsSlugify(s: str) -> str:
   return Slugify(unidecode.unidecode(s))
 
 
-def DocumentFromPath(path: str, existing_paths: Set[str]) -> Optional[Document]:
+def DocumentFromPath(path: str, existing_paths: Set[str],
+                     data_from_xml: Dict[str, MediawikiPage]) -> Optional[Document]:
   # First things first, let's check if we're even going to try.
   with open(path, "rb") as fd:
     content_bytes = fd.read()
@@ -264,7 +288,12 @@ def DocumentFromPath(path: str, existing_paths: Set[str]) -> Optional[Document]:
         path, fm_delimiter)
       return None
   title = TitleFromPath(path)
-  return Document(markdown_text, path)
+  mp: Optional[MediawikiPage] = None
+  if title in data_from_xml:
+    mp = data_from_xml[title]
+  else:
+    mp = None
+  return Document(markdown_text, path, mp)
 
 
 def WriteContent(content: str, path: str) -> None:
@@ -323,6 +352,9 @@ if __name__ == '__main__':
   parser.add_argument(
     "--image-tag", metavar="TAG", default="File",
     help="Name of the Image tag in Mediawiki.")
+  parser.add_argument(
+    "--xml-data", metavar="PATH", default=None,
+    help="Path to the XML export from Mediawiki")
   args = parser.parse_args()
   CATEGORY_TAG = args.category_tag
   IMAGE_TAG = args.image_tag
@@ -333,6 +365,28 @@ if __name__ == '__main__':
     "python3 utils/mediawiki_markdown_to_hugo.py content"
   )
   markdown_paths, backup_paths = MarkdownPaths(args.content_directory)
+
+  data_from_xml: Dict[str, MediawikiPage] = {}
+  # Why can't I get it from the XML itself?
+  ns = {'mw': 'http://www.mediawiki.org/xml/export-0.10/'}
+  # Read the XML export if it exists.
+  def Value(page, name) -> str:
+    maybe_element = page.find(name, ns)
+    if maybe_element is not None:
+      return '\n'.join(maybe_element.itertext())
+    raise ValueError(f"Incomplete data in XML {page!r} for {name!r}")
+
+  if args.xml_data:
+    tree = ET.parse(args.xml_data)
+    root = tree.getroot()
+    for page in root.findall('mw:page', ns):
+      try:
+        title = Value(page, 'mw:title')
+        timestamp = Value(page, 'mw:revision/mw:timestamp')
+        contributor = Value(page, './/mw:contributor/mw:username')
+        data_from_xml[title] = MediawikiPage(title, timestamp, contributor)
+      except ValueError:
+        pass
 
   for backup_path in backup_paths:
     logging.debug("Backup file %s already exists; Restoring it automatially",
@@ -346,7 +400,7 @@ if __name__ == '__main__':
 
   documents: Dict[str, Document] = {}
   for path in markdown_paths:
-    doc = DocumentFromPath(path, markdown_paths)
+    doc = DocumentFromPath(path, markdown_paths, data_from_xml)
     if doc is None:
       continue
     wiki_name = doc.fm.title.replace(' ', '_')

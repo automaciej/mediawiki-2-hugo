@@ -43,7 +43,7 @@ W tym rozdziale umieszczę trzy bardzo ważne elementy artykulacji:
 class ConversionTest(unittest.TestCase):
 
   def testBasicStuff(self):
-    doc = m.Document(TEST_ARTICLE_1, "content/bar/Test_Article_1.md")
+    doc = m.Document(TEST_ARTICLE_1, "content/bar/Test_Article_1.md", None)
     self.assertEqual("bar/test-article-1", doc.URLPath())
     fm = doc.fm
     self.assertEqual(fm.title, "Test Article 1")
@@ -75,12 +75,14 @@ class ConversionTest(unittest.TestCase):
     fm.categories.append("A-test-category")
     fm.aliases.append("B-alias")
     fm.aliases.append("A-alias")
+    fm.contributor = "Zenek"
     expected = """---
 title: "Test title 1"
 slug: "test-title-1"
 date: 2005-01-01T00:00:00+01:00
 kategorie: ['A-test-category', 'B-test-category']
 draft: false
+contributor: 'Zenek'
 wikilinks: ['Another_article']
 aliases: ['A-alias', 'B-alias']
 ---
@@ -123,10 +125,11 @@ images:
 
   def testWikilinks(self):
     redirects = {}
-    dest_doc = m.Document("", "content/książka/Modulatory_i_filtry_dźwięku.md")
+    dest_doc = m.Document("", "content/książka/Modulatory_i_filtry_dźwięku.md",
+                         None)
     doc = m.Document('3.  [Modulatory i filtry dźwięku]'
                      '(Modulatory_i_filtry_dźwięku "wikilink")',
-                     'content/książka/foo.md')
+                     'content/książka/foo.md', None)
     by_path = {m.path: m for m in (dest_doc, doc)}
     dst = ('3.  [Modulatory i filtry dźwięku]'
           '({{< relref "Modulatory_i_filtry_dźwięku.md" >}})')
@@ -135,9 +138,9 @@ images:
   def testWikilinksParen(self):
     redirects = {}
     dest_doc = m.Document(
-      "", "content/książka/Bossa_Nova_\\(akompaniament\\).md")
+      "", "content/książka/Bossa_Nova_\\(akompaniament\\).md", None)
     doc = m.Document('[Coś tam (akompaniament)](Bossa_Nova_\(akompaniament\) '
-                     '"wikilink")', 'content/książka/foo.md')
+                     '"wikilink")', 'content/książka/foo.md', None)
     by_path = {m.path: m for m in (dest_doc, doc)}
     dst = ('[Coś tam (akompaniament)]'
            '({{< relref "Bossa_Nova_\(akompaniament\).md" >}})')
@@ -149,7 +152,7 @@ images:
     dest_doc = m.Document(
       "", "content/książka/Bossa_Nova_\\(akompaniament\\).md")
     doc = m.Document('[some anchor](:Kategoria:Tabele_chwytów "wikilink") a',
-                     'content/książka/foo.md')
+                     'content/książka/foo.md', None)
     by_path = {m.path: m for m in (dest_doc, doc)}
     dst = ('[some anchor]'
            '(/kategorie/tabele-chwytów "Kategoria Tabele chwytów")'
@@ -160,9 +163,9 @@ images:
     m.CATEGORY_TAG = "kategoria"
     redirects = {}
     doc_akord = m.Document('O akordzie',
-                     'content/książka/Akord.md')
+                     'content/książka/Akord.md', None)
     doc = m.Document('[akord](akord "wikilink")',
-                     'content/książka/foo.md')
+                     'content/książka/foo.md', None)
     by_path = m.DocumentsByPath((doc_akord, doc))
     dst = ('[akord]({{< relref "Akord.md" >}})')
     self.assertEqual(dst, doc.TryToFixWikilinks(by_path, redirects).content)
@@ -170,13 +173,13 @@ images:
   def testWikilinksCategoryWithSpaces(self):
     m.CATEGORY_TAG = "kategoria"
     doc = m.Document('[kategoria:technika gry](kategoria:technika_gry "wikilink")',
-                     'foo/Page_Title.md')
+                     'foo/Page_Title.md', None)
     self.assertIn('Technika gry', doc.fm.categories)
 
   def testCategoryWithDiacritics(self):
     m.CATEGORY_TAG = "kategoria"
     doc = m.Document('[Pass, Joe](kategoria:gitarzyści_jazzowi "wikilink")',
-                     'content/książka/foo.md')
+                     'content/książka/foo.md', None)
     by_path = {m.path: m for m in (doc,)}
     self.assertIn("Gitarzyści jazzowi", doc.fm.categories)
 
@@ -184,26 +187,26 @@ images:
     m.CATEGORY_TAG = 'kategoria'
     doc = m.Document(
       'head[kategoria:technika gry](# "Niestety nic nie ma pod '
-      'tym linkiem")tail', 'content/książka/foo.md')
+      'tym linkiem")tail', 'content/książka/foo.md', None)
     dst = 'headtail'
     self.assertEqual(dst, doc.RemoveCategoryLinks().content)
 
   def testRedirection(self):
     doc = m.Document(
       '1.  REDIRECT [Regulacja gryfu](Regulacja_gryfu "wikilink")',
-      'foo/bar.md')
+      'foo/bar.md', None)
     self.assertEqual("Regulacja_gryfu" , doc.GetRedirect())
 
   def testRedirectionStruna(self):
     doc = m.Document(
       '1.  REDIRECT [Struna](Struna "wikilink")',
-      'foo/bar.md')
+      'foo/bar.md', None)
     self.assertEqual("Struna", doc.GetRedirect())
 
   def testURLPathWithSlash(self):
     doc = m.Document(
       '1.  REDIRECT [C9sus](C9sus "wikilink")',
-      'content/książka/B♭/C.md')
+      'content/książka/B♭/C.md', None)
     self.assertEqual("C9sus", doc.GetRedirect())
     self.assertEqual("b-c", doc.fm.slug)
     self.assertEqual("książka/b-c", doc.URLPath())
@@ -212,7 +215,7 @@ images:
     m.IMAGE_TAG = 'grafika'
     doc = m.Document(
       '[thumb](Grafika:MarekBlizinskiPozycja.jpg "wikilink") - postawa z',
-      'foo/bar.md')
+      'foo/bar.md', None)
     self.assertEqual(
       '{{< figure src="/images/MarekBlizinskiPozycja.jpg" >}} - postawa z',
       doc.HandleImageTags().content)
@@ -221,7 +224,7 @@ images:
     m.IMAGE_TAG = 'grafika'
     doc = m.Document(
       '[thumb](Grafika:plectrum1.jpg "wikilink") - postawa z',
-      'foo/bar.md')
+      'foo/bar.md', None)
     self.assertEqual('{{< figure src="/images/Plectrum1.jpg" >}} - postawa z',
                      doc.HandleImageTags().content)
 
@@ -229,7 +232,7 @@ images:
     m.IMAGE_TAG = 'grafika'
     doc = m.Document(
       '[thumb\nnail](Grafika:MarekBlizinskiPozycja.jpg "wikilink") - postawa z',
-      'foo/bar.md')
+      'foo/bar.md', None)
     self.assertEqual(["/images/MarekBlizinskiPozycja.jpg"], doc.fm.image_paths)
     self.assertEqual(
       '{{< figure src="/images/MarekBlizinskiPozycja.jpg" >}} - postawa z',
@@ -240,7 +243,7 @@ images:
     doc = m.Document(
       '[thumb\nnail](Grafika:MarekBlizinskiPozycja.jpg "wikilink") - postawa z'
       '[somethingelse](Grafika:anotherImage.jpg "wikilink")',
-      'foo/bar.md')
+      'foo/bar.md', None)
     self.assertEqual(["/images/MarekBlizinskiPozycja.jpg",
                       "/images/AnotherImage.jpg"], doc.fm.image_paths)
 
