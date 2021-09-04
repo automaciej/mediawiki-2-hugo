@@ -54,8 +54,22 @@ class ConversionTest(unittest.TestCase):
       "Szła dzieweczka do laseczka",
       m.TitleFromPath("content/książka/Szła_dzieweczka_do_laseczka.md"))
 
+  def testTitleFromPathNoSubdir(self):
+    self.assertEqual(
+      "Szła dzieweczka do laseczka",
+      m.TitleFromPath("content/Szła_dzieweczka_do_laseczka.md"))
+
   def testTitleFromPathWithSlash(self):
     self.assertEqual("F7/C", m.TitleFromPath("content/książka/F7/C.md"))
+
+  def testTitleFromPathWithSlashNoSubdir(self):
+    self.assertEqual("F7/C", m.TitleFromPath("content/F7/C.md"))
+
+  def testIsNoteName(self):
+    self.assertTrue(m._isNoteName('C'))
+    self.assertTrue(m._isNoteName('C♯'))
+    self.assertTrue(m._isNoteName('D♭'))
+    self.assertFalse(m._isNoteName('T'))
 
   def testSlugify(self):
     self.assertEqual(

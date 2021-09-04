@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 
 import argparse
 import commonmark  # type: ignore
+import itertools
 import logging
 import os
 import os.path
@@ -353,12 +354,34 @@ def DocumentsByPath(documents: Iterable[Document]) -> Dict[str, Document]:
   return by_path
 
 
+def _isNoteName(s: str) -> bool:
+  flat = '♭'
+  sharp = '♯'
+  letters = [chr(x) for x in range(ord('A'), ord('H'))]
+  with_flat = [x + flat for x in letters]
+  with_sharp = [x + sharp for x in letters]
+  notes = set(itertools.chain(letters, with_flat, with_sharp))
+  return s in notes
+
 def TitleFromPath(path: str) -> str:
-  "Derive the title from path."
-  parts = path.split("/")
-  skippedtwo = '/'.join(parts[2:])
-  base, _ = os.path.splitext(skippedtwo)
-  return base.replace("_", " ")
+  """Derive the title from path.
+
+  content/książka/Foo.md => Foo
+
+  Also support chord names with slashes:
+
+  content/książka/F/C.md => F/C
+  content/F/C.md => F/C
+  """
+  no_ext, _ = os.path.splitext(path)
+  parts = no_ext.split("/")
+  # Special case for chords.
+  collapse_last_slash = _isNoteName(parts[-1])
+  if collapse_last_slash:
+    use_for_title = parts[-2] + '/' + parts[-1]
+  else:
+    use_for_title = parts[-1]
+  return use_for_title.replace("_", " ")
 
 
 if __name__ == '__main__':
