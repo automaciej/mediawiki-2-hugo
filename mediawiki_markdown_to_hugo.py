@@ -75,6 +75,7 @@ class FrontMatter:
   # Metadata from Mediawiki XML export.
   timestamp: Optional[str] = field(init=False, default="")
   contributor: Optional[str] = field(init=False, default="")
+  wiki_name: Optional[str] = field(init=False, default=None)
 
   def ToString(self) -> str:
     wiki_destinations = [f"{wl.destination}" for wl in self.wikilinks]
@@ -239,6 +240,7 @@ class Document:
     if ast is None:
       raise Exception("Parsing failed?")
     fm = FrontMatter(title=title, slug=Slugify(title))
+    fm.wiki_name = fm.title.replace(" ", "_")
     bald_slug = NoDiacriticsSlugify(title)
     if bald_slug != fm.slug:
       fm.aliases.append(bald_slug)
@@ -449,9 +451,9 @@ if __name__ == '__main__':
     doc = DocumentFromPath(path, markdown_paths, data_from_xml)
     if doc is None:
       continue
-    wiki_name = doc.fm.title.replace(' ', '_')
+    wiki_name = doc.fm.wiki_name
     assert wiki_name not in documents, (
-      f"{wiki_name} ({doc.path}) is already in documents: "
+      f"Page {wiki_name!r} ({doc.path}) is already in documents: "
       f"{documents[wiki_name].path}")
     documents[wiki_name] = doc
 
