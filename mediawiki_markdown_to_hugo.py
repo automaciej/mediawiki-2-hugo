@@ -201,6 +201,29 @@ class Document:
     return Document(re.sub(image_pattern, repl, self.content, flags=re.IGNORECASE),
                     self.path, self.mp)
 
+  def FixMonospace(self) -> 'Document':
+    _outside = 0
+    _inside = 1
+    result = []
+    state = _outside
+    pattern = re.compile('^`(?P<monospace>.*)`$')
+    for line in self.content.splitlines(keepends=False):
+      if state == _outside:
+        m = re.match(pattern, line)
+        if m is not None:
+          result.extend(['', '```', m['monospace']])
+          state = _inside
+        else:
+          result.append(line)
+      elif state == _inside:
+        m = re.match(pattern, line)
+        if m is not None:
+          result += [m['monospace']]
+        else:
+          result.extend(['```', '', line])
+          state = _outside
+    return Document('\n'.join(result) + '\n', self.path, self.mp)
+
   def GetRedirect(self) -> Optional[str]:
     """If the document is a redirection, return the destination."""
     anchor_pat = '\[(?P<anchor>[^\]]+)\]'
@@ -439,6 +462,7 @@ if __name__ == '__main__':
     updated_content: str = doc.fm.ToString() + (doc.RemoveCategoryLinks()
                           .HandleImageTags()
                           .TryToFixWikilinks(by_path, redirects)
+                          .FixMonospace()
                           .content)
 
     WriteContent(updated_content, doc.path)

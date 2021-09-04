@@ -247,6 +247,14 @@ images:
     self.assertEqual(["/images/MarekBlizinskiPozycja.jpg",
                       "/images/AnotherImage.jpg"], doc.fm.image_paths)
 
+  def testBackwardCompatibilityURL(self):
+    doc = m.Document('test content', 'foo/Page_Title.md', None)
+    self.assertIn('/gitara/Page_Title', doc.fm.aliases)
+
+  def testFixMonospace(self):
+    doc = m.Document('a\n`line1`\n`line2`\nb\n', 'foo/Page_Title.md', None)
+    self.assertEqual('a\n\n```\nline1\nline2\n```\n\nb\n', doc.FixMonospace().content)
+
 
 if __name__ == '__main__':
   unittest.main()
