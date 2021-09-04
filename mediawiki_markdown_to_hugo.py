@@ -10,15 +10,15 @@ Known issues:
 - Read missing data from the Mediawiki XML export.
 
 Q: The script messed up my directory! I want to restore the previous files!
-A: for f in *.orig; do mv -v "${f}" "${f/.orig}"; done
+A: for f in *.backup; do mv -v "${f}" "${f/.backup}"; done
 
 TODO: Make the above recursive? This is surprisingly nontrivial.
 
 This doesn't work: 
 
 ```
-find content -name '*.md.orig' -exec \
-    mv -f {} "$(echo -n {} | sed -e 's/\\.orig$//')" \;
+find content -name '*.md.backup' -exec \
+    mv -f {} "$(echo -n {} | sed -e 's/\\.backup$//')" \;
 ```
 
 The reason is quite funny: What `find` gets in argv is `mv -f {} {}` because the
@@ -45,7 +45,7 @@ import xml.etree.ElementTree as ET
 # Language dependent
 CATEGORY_TAG = "Category"
 IMAGE_TAG = "Graphics"
-BACKUP_EXT = ".orig"
+BACKUP_EXT = ".backup"
 
 
 @dataclass
@@ -445,7 +445,7 @@ if __name__ == '__main__':
   for backup_path in backup_paths:
     logging.debug("Backup file %s already exists; Restoring it automatially",
                   backup_path)
-    path: str = re.sub('\.orig$', '', backup_path)
+    path: str = re.sub(re.escape(BACKUP_EXT)+'$', '', backup_path)
     shutil.move(backup_path, path)
 
   # Let's verify that backups have been restored.
