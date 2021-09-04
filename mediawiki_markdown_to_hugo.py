@@ -256,7 +256,9 @@ class Document:
         url = node.destination
         title = node.title
         category_pat = f"{CATEGORY_TAG}:(?P<category>.*)"
-        m = re.search(category_pat, url, flags=re.IGNORECASE)
+        # Links targets starting with a ":" mean that the page in question does
+        # not itself belong to the category, but only links to it.
+        m = re.match(category_pat, url, flags=re.IGNORECASE)
         if m:
           category = (urllib.parse.unquote_plus(m['category'])
                       .replace('_', ' ').capitalize())
