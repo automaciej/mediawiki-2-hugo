@@ -76,6 +76,7 @@ class FrontMatter:
   timestamp: Optional[str] = field(init=False, default="")
   contributor: Optional[str] = field(init=False, default="")
   wiki_name: Optional[str] = field(init=False, default=None)
+  slug_with_diacritics: Optional[str] = field(init=False, default=None)
 
   def ToString(self) -> str:
     wiki_destinations = [f"{wl.destination}" for wl in self.wikilinks]
@@ -175,7 +176,7 @@ class Document:
           return annotate_invalid(anchor, "Could not find the category tag")
         category = m['category']
         # TODO: Customize the category URL path from "kategorie"
-        slug = Slugify(category)
+        slug = Slugify(unidecode.unidecode(category))
         return "[%s](/kategorie/%s \"Kategoria %s\")" % (
           anchor, slug, category.replace("_", " "))
       else:
@@ -238,12 +239,19 @@ class Document:
     parser = commonmark.Parser()
     ast = parser.parse(self.content)
     if ast is None:
-      raise Exception("Parsing failed?")
-    fm = FrontMatter(title=title, slug=Slugify(title))
+      raise Exception("parsing of {self.path!r} markdown failed")
+    # Diacritics in URL paths encode ugly, for example "książka" becomes a
+    # "ksi%C4%85%C5%BCka". Words with diacritics removed ("ksiazka") are also
+    # ugly, but they are more readable.
+    # There might be a mitigation by using HTTP temporary redirects.
+    # Discussed here:
+    # https://serverfault.com/questions/1076344/temporary-redirects-302-307-on-a-static-site-frequently-updated
+    bald_slug = Slugify(unidecode.unidecode(title))
+    fm = FrontMatter(title=title, slug=bald_slug)
     fm.wiki_name = fm.title.replace(" ", "_")
-    bald_slug = NoDiacriticsSlugify(title)
-    if bald_slug != fm.slug:
-      fm.aliases.append(bald_slug)
+    fm.slug_with_diacritics = Slugify(title)
+    if fm.slug_with_diacritics != fm.slug:
+      fm.aliases.append(fm.slug_with_diacritics)
     # ast.walker seems to visit some nodes more than once.
     # This is surprising.
     already_seen = set()
@@ -297,10 +305,6 @@ def Slugify(s: str) -> str:
   lowercased = no_under.lower()
   segments = re.split("[^\w]+", lowercased)
   return ("-".join(segments)).strip('-')
-
-
-def NoDiacriticsSlugify(s: str) -> str:
-  return Slugify(unidecode.unidecode(s))
 
 
 def DocumentFromPath(path: str, existing_paths: Set[str],
