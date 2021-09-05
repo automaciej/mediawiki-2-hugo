@@ -228,7 +228,7 @@ class Document:
     return Document('\n'.join(result) + '\n', self.path, self.mp)
 
   def GetRedirect(self) -> Optional[str]:
-    """If the document is a redirection, return the destination."""
+    """If the document is a redirection, return the destination wiki name."""
     anchor_pat = '\[(?P<anchor>[^\]]+)\]'
     redir_pat = 'REDIRECT\\s+' + anchor_pat + '\((?P<dest>[^\s]+) "wikilink"\)'
     m = re.search(redir_pat, self.content)
@@ -250,8 +250,6 @@ class Document:
     fm = FrontMatter(title=title, slug=bald_slug)
     fm.wiki_name = fm.title.replace(" ", "_")
     fm.slug_with_diacritics = Slugify(title)
-    if fm.slug_with_diacritics != fm.slug:
-      fm.aliases.append(fm.slug_with_diacritics)
     # ast.walker seems to visit some nodes more than once.
     # This is surprising.
     already_seen = set()
@@ -290,14 +288,28 @@ class Document:
       fm.date = self.mp.timestamp
       fm.contributor = self.mp.contributor
 
+    # This doesn't work because aliases also need the path. The slug is not the
+    # full URL path.
+    # if fm.slug_with_diacritics != fm.slug:
+    #   fm.aliases.append(fm.slug_with_diacritics)
     return fm
 
   def URLPath(self):
-    """The URL path to access this document from, for redirects."""
+    """The URL path to access this document from, for redirects.
+
+    This is not generic enough. In this case it's hard to predict what the URL
+    will be, because it depends on the target Hugo configuration. In theory this
+    could take the Hugo config and work off of that, but... it's too complex for
+    me to implement to fix like 5 URLs.
+    """
     segments = self.path.split("/")
+    assert segments[0] == 'content'
     segments = segments[1:]  # drop "content/"
-    segments = segments[:1]  # only 1 of depth
-    return "/".join(segments + [self.fm.slug])
+    if len(segments) > 1:
+      segments = segments[:1]  # only 1 URL depth
+    else:
+      segments = []
+    return "/" + "/".join(segments + [self.fm.slug])
 
 
 def Slugify(s: str) -> str:
@@ -469,7 +481,8 @@ if __name__ == '__main__':
     if doc.fm.redirect is None:
       continue
     if doc.fm.redirect in documents:
-      documents[doc.fm.redirect].fm.aliases.append(doc.URLPath())
+      target_doc = documents[doc.fm.redirect]
+      target_doc.fm.aliases.append(doc.URLPath())
       # The target in the dictionary should be the path of the .md file.
       doc_dir, _ = os.path.split(doc.path)
       dest_path = os.path.join(doc_dir, doc.fm.redirect + ".md")

@@ -44,7 +44,7 @@ class ConversionTest(unittest.TestCase):
 
   def testBasicStuff(self):
     doc = m.Document(TEST_ARTICLE_1, "content/bar/Test_Article_1.md", None)
-    self.assertEqual("bar/test-article-1", doc.URLPath())
+    self.assertEqual("/bar/test-article-1", doc.URLPath())
     fm = doc.fm
     self.assertEqual(fm.title, "Test Article 1")
     self.assertEqual(fm.slug, "test-article-1")
@@ -217,13 +217,21 @@ images:
       'foo/bar.md', None)
     self.assertEqual("Struna", doc.GetRedirect())
 
+  def testURLPathTopLevel(self):
+    doc = m.Document(
+      '1.  REDIRECT [C9sus](C9sus "wikilink")',
+      'content/foo.md', None)
+    self.assertEqual("C9sus", doc.GetRedirect())
+    self.assertEqual("foo", doc.fm.slug)
+    self.assertEqual("/foo", doc.URLPath())
+
   def testURLPathWithSlash(self):
     doc = m.Document(
       '1.  REDIRECT [C9sus](C9sus "wikilink")',
       'content/książka/B♭/C.md', None)
     self.assertEqual("C9sus", doc.GetRedirect())
     self.assertEqual("b-c", doc.fm.slug)
-    self.assertEqual("książka/b-c", doc.URLPath())
+    self.assertEqual("/książka/b-c", doc.URLPath())
 
   def testHandleImageTags(self):
     m.IMAGE_TAG = 'grafika'
