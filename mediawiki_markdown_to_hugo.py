@@ -481,12 +481,6 @@ if __name__ == '__main__':
     else:
       logging.warning(f"Bad redirect: {doc.fm.redirect!r}")
 
-  # Now that we're unlinking documents, we need to replace the references to
-  # redirects in existing documents. For each document, for each reference, N*M.
-  for path, destination in redirects.items():
-    for doc in documents.values():
-      doc.content = doc.content.replace(path, dest_path)
-
   by_path: Dict[str, Document] = DocumentsByPath(documents.values())
 
   for doc in documents.values():
