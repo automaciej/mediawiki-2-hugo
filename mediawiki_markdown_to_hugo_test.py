@@ -246,7 +246,7 @@ images:
     doc = m.Document(
       '1.  REDIRECT [Regulacja gryfu](Regulacja_gryfu "wikilink")',
       Path('foo/bar.md'), None)
-    self.assertEqual("Regulacja_gryfu" , doc.GetRedirect())
+    self.assertEqual("Regulacja_Gryfu" , doc.GetRedirect())
 
   def testRedirectionStruna(self):
     doc = m.Document(
@@ -258,7 +258,7 @@ images:
     doc = m.Document(
       '1.  REDIRECT [C9sus](C9sus "wikilink")',
       Path('foo.md'), None)
-    self.assertEqual("C9sus", doc.GetRedirect())
+    self.assertEqual("C9Sus", doc.GetRedirect())
     self.assertEqual("foo", doc.fm.slug)
     self.assertEqual("/foo", doc.URLPath())
 
@@ -266,7 +266,7 @@ images:
     doc = m.Document(
       '1.  REDIRECT [C9sus](C9sus "wikilink")',
       Path('książka/B♭/C.md'), None)
-    self.assertEqual("C9sus", doc.GetRedirect())
+    self.assertEqual("C9Sus", doc.GetRedirect())
     self.assertEqual("b-c", doc.fm.slug)
     self.assertEqual("/książka/b-c", doc.URLPath())
 

@@ -131,7 +131,7 @@ class Document:
     anchor_pat = '\[(?P<anchor>[^\]]+)\]'
     redir_pat = 'REDIRECT\\s+' + anchor_pat + '\((?P<dest>[^\s]+) "wikilink"\)'
     m = re.search(redir_pat, self.content)
-    return Wikiname(m['dest']) if m else None
+    return Wikiname(m['dest'].title()) if m else None
 
   def MakeFrontMatter(self) -> FrontMatter:
     title = TitleFromPath(self.path)
@@ -147,7 +147,7 @@ class Document:
     # https://serverfault.com/questions/1076344/temporary-redirects-302-307-on-a-static-site-frequently-updated
     bald_slug = Slugify(unidecode.unidecode(title))
     fm = FrontMatter(title=title, slug=bald_slug)
-    fm.wiki_name = Wikiname(fm.title.replace(" ", "_"))
+    fm.wiki_name = Wikiname(fm.title.replace(" ", "_").title())
     fm.slug_with_diacritics = Slugify(title)
     # ast.walker seems to visit some nodes more than once.
     # This is surprising.
@@ -216,51 +216,47 @@ class Document:
       dest = m['dest']
       dest_wikiname = Wikiname(m['dest'].title())
       anchor: str = m['anchor']
-      # We've found a destination, does it exist on disk?
-      if dest_wikiname in by_wikiname:
-        dest_path: pathlib.Path = by_wikiname[dest_wikiname].path
-      else:
-        # This is the case with categories for example.
-        dest_path = pathlib.Path('/invalid/path')
       def annotate_invalid(s: str, reason: str) -> str:
         logging.info("Unable to fix link [%r](%r) in %r: %s", anchor, dest,
                      self.path, reason)
         return f"{s}<!-- link nie odnosił się do niczego: {reason} -->"
       def RedirectExists(wikiname: Wikiname) -> bool:
-        wikiname_title = Wikiname(wikiname.title())
-        return wikiname_title in redirects and redirects[wikiname_title] in by_wikiname
-      def ResolveRedirect(p: pathlib.Path) -> Optional[Document]:
+        return wikiname in redirects and redirects[wikiname] in by_wikiname
+      def ResolvePathRedirect(p: pathlib.Path) -> Optional[Document]:
         logging.debug("ResolveRedirect(%r)", p)
+        return ResolveRedirect(WikinameFromPath(p))
+      def ResolveRedirect(wikiname: Wikiname) -> Optional[Document]:
         doc: Optional[Document] = None
-        wikiname: Wikiname = WikinameFromPath(p)
-        wikiname = Wikiname(wikiname.title())
         visited: Set[Wikiname] = set()
-        while RedirectExists(wikiname):
-          assert wikiname not in visited, (
+        wikiname_title = Wikiname(wikiname.title())
+        while RedirectExists(wikiname_title):
+          assert wikiname_title not in visited, (
             f"Redirect loop for {wikiname}, visited: {visited}")
-          visited.add(wikiname)
-          wikiname = Wikiname(redirects[wikiname].title())
-          doc = by_wikiname[wikiname]
+          visited.add(wikiname_title)
+          logging.debug("Found a redirect from %r to %r",
+                        wikiname_title, redirects[wikiname_title])
+          wikiname_title = Wikiname(redirects[wikiname_title].title())
+          doc = by_wikiname[wikiname_title]
+          assert wikiname_title == doc.fm.wiki_name, (
+            f"{wikiname_title!r} != {doc.fm.wiki_name!r}")
+        if doc is not None and doc.fm.redirect is not None:
+          raise ValueError(f"Trying to redirect to a redirection")
         return doc
-      target_doc = ResolveRedirect(dest_path)
+      # Resolve redirections.
+      target_doc: Optional[Document] = ResolveRedirect(dest_wikiname)
+      # Categories don't have a path.
+      dest_path = pathlib.Path('/no/path/exists')
+      if target_doc is not None:
+        dest_path = target_doc.path
+      elif dest_wikiname in by_wikiname:
+        target_doc = by_wikiname[dest_wikiname]
+        dest_path = target_doc.path
       dest_ref: str
       if target_doc is not None:
+        assert target_doc.path in by_path
         dest_ref = target_doc.fm.title.replace(' ', '_') + '.md'
-      elif dest_path in by_path and by_path[dest_path].GetRedirect():
-        target_doc = by_path[dest_path]
-        after_redirection = ResolveRedirect(target_doc.path)
-        if after_redirection is None:
-          msg = ("%r wants to redirect to %r, but %r will be deleted" % (
-                 dest_path, target_doc.path, target_doc.path))
-          return annotate_invalid(anchor, msg)
-        else:
-          target_doc = after_redirection
-          dest_ref = target_doc.path.parts[-1]
       elif dest_path in by_path:
         target_doc = by_path[dest_path]
-        dest_ref = target_doc.path.parts[-1]
-      elif Wikiname(dest_wikiname) in by_wikiname:
-        target_doc = by_wikiname[dest_wikiname]
         dest_ref = target_doc.path.parts[-1]
       elif re.match(':'+CATEGORY_TAG+':', dest, flags=re.IGNORECASE):
         m = re.search(':'+CATEGORY_TAG+':(?P<category>.*):?', dest, re.IGNORECASE)
@@ -537,17 +533,17 @@ if __name__ == '__main__':
     if wiki_name is not None:
       documents[wiki_name] = doc
 
+  by_path: Dict[pathlib.Path, Document] = DocumentsByPath(documents.values())
+  by_wikiname: Dict[Wikiname, Document] = DocumentsByWikiname(documents.values())
+
   redirects: Dict[Wikiname, Wikiname] = {}
   # Need to find the redirects, and assign aliases.
   for wiki_name, doc in documents.items():
     if doc.fm.redirect is None:
       continue
-    if doc.fm.redirect in documents:
-      target_doc = documents[doc.fm.redirect]
+    if doc.fm.redirect in by_wikiname:
+      target_doc = by_wikiname[doc.fm.redirect]
       target_doc.fm.aliases.append(doc.URLPath())
-      # The target in the dictionary should be the path of the .md file.
-      doc_dir: pathlib.Path = pathlib.Path(doc.path.parts[0]) if len(doc.path.parts) > 1 else pathlib.Path('.')
-      dest_path = doc_dir.joinpath(pathlib.Path(doc.fm.redirect + ".md"))
       if doc.fm.wiki_name is not None:
         redirects[Wikiname(doc.fm.wiki_name.title())] = doc.fm.redirect
       else:
@@ -559,8 +555,6 @@ if __name__ == '__main__':
     else:
       logging.warning(f"Bad redirect: {doc.fm.redirect!r}")
 
-  by_path: Dict[pathlib.Path, Document] = DocumentsByPath(documents.values())
-  by_wikiname: Dict[Wikiname, Document] = DocumentsByWikiname(documents.values())
 
   writing_result: Dict[pathlib.Path, bool] = {}
   number_files_written = 0
