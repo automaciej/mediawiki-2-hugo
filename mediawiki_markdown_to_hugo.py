@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 
 import argparse
 import commonmark  # type: ignore
+import difflib
 import itertools
 import logging
 import os
@@ -343,17 +344,25 @@ def DocumentFromPath(root_dir: pathlib.Path, path: pathlib.Path, existing_paths:
   return Document(markdown_text, path, mp)
 
 
-def WriteContent(content: str, path: str, dry_run: bool) -> None:
-  # Let's not destroy people's work.
-  if os.path.exists(path):
-    logging.warning("Won't write to %r (already exists)", path)
-    return
+def WriteContent(content: str, path: str, dry_run: bool) -> bool:
+  content_bytes = content.encode('utf-8')
+  # Is there a diff?
+  try:
+    with open(path, "rb") as fd:
+      existing_content = fd.read()
+      if content_bytes == existing_content:
+        logging.info('No diffs found for %r', path)
+        return False
+  except FileNotFoundError:
+    # That's fine.
+    pass
 
   if not dry_run:
     with open(path, "wb") as fd:
-      fd.write(content.encode("utf-8"))
+      fd.write(content_bytes)
   else:
     logging.info("[dry run] Would write to %r", path)
+  return True
 
 
 def MarkdownPaths(dirname: str) -> Set[pathlib.Path]:
