@@ -111,6 +111,93 @@ class Document:
     # Instead we'll replace the empty FrontMatter with one with data.
     self.fm = self.MakeFrontMatter()
 
+  def URLPath(self):
+    """The URL path to access this document from, for redirects.
+
+    This is not generic enough. In this case it's hard to predict what the URL
+    will be, because it depends on the target Hugo configuration. In theory this
+    could take the Hugo config and work off of that, but... it's too complex for
+    me to implement to fix like 5 URLs.
+    """
+    segments = self.path.parts
+    if len(segments) > 1:
+      segments = segments[:1]  # only 1 URL depth
+    else:
+      segments = []
+    return "/" + "/".join(itertools.chain(segments, [self.fm.slug]))
+
+  def GetRedirect(self) -> Optional[Wikiname]:
+    """If the document is a redirection, return the destination wiki name."""
+    anchor_pat = '\[(?P<anchor>[^\]]+)\]'
+    redir_pat = 'REDIRECT\\s+' + anchor_pat + '\((?P<dest>[^\s]+) "wikilink"\)'
+    m = re.search(redir_pat, self.content)
+    return Wikiname(m['dest']) if m else None
+
+  def MakeFrontMatter(self) -> FrontMatter:
+    title = TitleFromPath(self.path)
+    parser = commonmark.Parser()
+    ast = parser.parse(self.content)
+    if ast is None:
+      raise Exception("parsing of {self.path!r} markdown failed")
+    # Diacritics in URL paths encode ugly, for example "książka" becomes a
+    # "ksi%C4%85%C5%BCka". Words with diacritics removed ("ksiazka") are also
+    # ugly, but they are more readable.
+    # There might be a mitigation by using HTTP temporary redirects.
+    # Discussed here:
+    # https://serverfault.com/questions/1076344/temporary-redirects-302-307-on-a-static-site-frequently-updated
+    bald_slug = Slugify(unidecode.unidecode(title))
+    fm = FrontMatter(title=title, slug=bald_slug)
+    fm.wiki_name = Wikiname(fm.title.replace(" ", "_"))
+    fm.slug_with_diacritics = Slugify(title)
+    # ast.walker seems to visit some nodes more than once.
+    # This is surprising.
+    already_seen = set()
+    for node, unused_entering in ast.walker():
+      if node in already_seen:
+        continue
+      already_seen.add(node)
+      if node.t == "link":
+        anchor = node.first_child.literal
+        url = node.destination
+        title = node.title
+        category_pat = f"{CATEGORY_TAG}:(?P<category>.*)"
+        # Links targets starting with a ":" mean that the page in question does
+        # not itself belong to the category, but only links to it.
+        m = re.match(category_pat, url, flags=re.IGNORECASE)
+        if m:
+          category = (urllib.parse.unquote_plus(m['category'])
+                      .replace('_', ' ').capitalize())
+          fm.categories.append(category)
+        elif title == "wikilink":
+          fm.wikilinks.append(Wikilink(anchor, url))
+        else:
+          fm.links.append(Link(anchor, url, title))
+    fm.redirect = self.GetRedirect()
+    # Identify images on the page.
+    # TODO: Dedup image pattern.
+    image_pattern = '\[[^\]]+\]\(' + IMAGE_TAG + ':([^\s]+)\s"wikilink"\)'
+    for m in re.finditer(image_pattern, self.content, flags=re.IGNORECASE):
+      # Use first found image as the entry image.
+      # TODO: Deduplicate the image path.
+      image_path = "/images/" + m.group(1)[0].upper() + m.group(1)[1:]
+      fm.image_paths.append(image_path)
+
+    # Metadata from Mediawiki
+    if self.mp:
+      fm.date = self.mp.timestamp
+      fm.contributor = self.mp.contributor
+
+    # Add a compatibility alias from the pre-2021 URL scheme.
+    # TODO: This is specific to my current migration.
+    _, basename = os.path.split(self.path)
+    url_part, _ = os.path.splitext(basename)
+    fm.aliases.append(f"/gitara/{url_part}")
+    # This doesn't work because aliases also need the path. The slug is not the
+    # full URL path.
+    # if fm.slug_with_diacritics != fm.slug:
+    #   fm.aliases.append(fm.slug_with_diacritics)
+    return fm
+
   def TryToFixWikilinks(self,
                         by_path: Dict[pathlib.Path, 'Document'],
                         by_wikiname: Dict[Wikiname, 'Document'],
@@ -231,88 +318,6 @@ class Document:
           result.extend(['```', '', line])
           state = _outside
     return Document('\n'.join(result) + '\n', self.path, self.mp)
-
-  def GetRedirect(self) -> Optional[Wikiname]:
-    """If the document is a redirection, return the destination wiki name."""
-    anchor_pat = '\[(?P<anchor>[^\]]+)\]'
-    redir_pat = 'REDIRECT\\s+' + anchor_pat + '\((?P<dest>[^\s]+) "wikilink"\)'
-    m = re.search(redir_pat, self.content)
-    return Wikiname(m['dest']) if m else None
-
-  def MakeFrontMatter(self) -> FrontMatter:
-    title = TitleFromPath(self.path)
-    parser = commonmark.Parser()
-    ast = parser.parse(self.content)
-    if ast is None:
-      raise Exception("parsing of {self.path!r} markdown failed")
-    # Diacritics in URL paths encode ugly, for example "książka" becomes a
-    # "ksi%C4%85%C5%BCka". Words with diacritics removed ("ksiazka") are also
-    # ugly, but they are more readable.
-    # There might be a mitigation by using HTTP temporary redirects.
-    # Discussed here:
-    # https://serverfault.com/questions/1076344/temporary-redirects-302-307-on-a-static-site-frequently-updated
-    bald_slug = Slugify(unidecode.unidecode(title))
-    fm = FrontMatter(title=title, slug=bald_slug)
-    fm.wiki_name = Wikiname(fm.title.replace(" ", "_"))
-    fm.slug_with_diacritics = Slugify(title)
-    # ast.walker seems to visit some nodes more than once.
-    # This is surprising.
-    already_seen = set()
-    for node, unused_entering in ast.walker():
-      if node in already_seen:
-        continue
-      already_seen.add(node)
-      if node.t == "link":
-        anchor = node.first_child.literal
-        url = node.destination
-        title = node.title
-        category_pat = f"{CATEGORY_TAG}:(?P<category>.*)"
-        # Links targets starting with a ":" mean that the page in question does
-        # not itself belong to the category, but only links to it.
-        m = re.match(category_pat, url, flags=re.IGNORECASE)
-        if m:
-          category = (urllib.parse.unquote_plus(m['category'])
-                      .replace('_', ' ').capitalize())
-          fm.categories.append(category)
-        elif title == "wikilink":
-          fm.wikilinks.append(Wikilink(anchor, url))
-        else:
-          fm.links.append(Link(anchor, url, title))
-    fm.redirect = self.GetRedirect()
-    # Identify images on the page.
-    # TODO: Dedup image pattern.
-    image_pattern = '\[[^\]]+\]\(' + IMAGE_TAG + ':([^\s]+)\s"wikilink"\)'
-    for m in re.finditer(image_pattern, self.content, flags=re.IGNORECASE):
-      # Use first found image as the entry image.
-      # TODO: Deduplicate the image path.
-      image_path = "/images/" + m.group(1)[0].upper() + m.group(1)[1:]
-      fm.image_paths.append(image_path)
-
-    # Metadata from Mediawiki
-    if self.mp:
-      fm.date = self.mp.timestamp
-      fm.contributor = self.mp.contributor
-
-    # This doesn't work because aliases also need the path. The slug is not the
-    # full URL path.
-    # if fm.slug_with_diacritics != fm.slug:
-    #   fm.aliases.append(fm.slug_with_diacritics)
-    return fm
-
-  def URLPath(self):
-    """The URL path to access this document from, for redirects.
-
-    This is not generic enough. In this case it's hard to predict what the URL
-    will be, because it depends on the target Hugo configuration. In theory this
-    could take the Hugo config and work off of that, but... it's too complex for
-    me to implement to fix like 5 URLs.
-    """
-    segments = self.path.parts
-    if len(segments) > 1:
-      segments = segments[:1]  # only 1 URL depth
-    else:
-      segments = []
-    return "/" + "/".join(itertools.chain(segments, [self.fm.slug]))
 
 
 def Slugify(s: str) -> str:
