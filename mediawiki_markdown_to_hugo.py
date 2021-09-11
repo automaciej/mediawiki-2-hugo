@@ -351,7 +351,7 @@ def WriteContent(content: str, path: str, dry_run: bool) -> bool:
     with open(path, "rb") as fd:
       existing_content = fd.read()
       if content_bytes == existing_content:
-        logging.info('No diffs found for %r', path)
+        logging.debug('No diffs found for %r', path)
         return False
   except FileNotFoundError:
     # That's fine.
@@ -557,6 +557,8 @@ if __name__ == '__main__':
   by_path: Dict[pathlib.Path, Document] = DocumentsByPath(documents.values())
   by_wikiname: Dict[Wikiname, Document] = DocumentsByWikiname(documents.values())
 
+  writing_result: Dict[pathlib.Path, bool] = {}
+  number_files_written = 0
   for doc in documents.values():
     if doc.fm.redirect is not None:
       logging.info("Not writing %r because it's a redirect to %r", doc.path,
@@ -568,5 +570,10 @@ if __name__ == '__main__':
                           .FixMonospace()
                           .content)
 
-    WriteContent(updated_content, os.path.join(args.content_directory, doc.path),
-                 args.dry_run)
+    written = WriteContent(updated_content,
+                           os.path.join(args.content_directory, doc.path),
+                           args.dry_run)
+    writing_result[doc.path] = written
+    number_files_written += 1
+  dry_run_section = "(would have) " if args.dry_run else ""
+  print(f"{dry_run_section} written {number_files_written} files.")
