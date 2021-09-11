@@ -3,29 +3,9 @@
 
 Used on output from:
 https://github.com/outofcontrol/mediawiki-to-gfm
-
-Known issues:
-
-- Need to clean up the wikilinks; serialize AST back to Markdown.
-- Read missing data from the Mediawiki XML export.
-
-Q: The script messed up my directory! I want to restore the previous files!
-A: for f in *.backup; do mv -v "${f}" "${f/.backup}"; done
-
-TODO: Make the above recursive? This is surprisingly nontrivial.
-
-This doesn't work: 
-
-```
-find content -name '*.md.backup' -exec \
-    mv -f {} "$(echo -n {} | sed -e 's/\\.backup$//')" \;
-```
-
-The reason is quite funny: What `find` gets in argv is `mv -f {} {}` because the
-"$( ... )" block gets executed by shell before `find` has a chance to see it.
 """
 
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, NewType, Optional, Set, Tuple
 from dataclasses import dataclass, field
 
 import argparse
@@ -37,15 +17,18 @@ import os.path
 import re
 import shutil
 import toml
+import pathlib
 import unidecode
 import urllib.parse
 import xml.etree.ElementTree as ET
 
 
+Wikiname = NewType('Wikiname', str)
+
+
 # Language dependent
 CATEGORY_TAG = "Category"
 IMAGE_TAG = "Graphics"
-BACKUP_EXT = ".backup"
 
 
 @dataclass
@@ -69,13 +52,13 @@ class FrontMatter:
   categories: List[str] = field(init=False, default_factory=list)
   links: List[Link] = field(init=False, default_factory=list)
   wikilinks: List[Wikilink] = field(init=False, default_factory=list)
-  redirect: Optional[str] = field(init=False, default=None)
+  redirect: Optional[Wikiname] = field(init=False, default=None)
   aliases: List[str] = field(init=False, default_factory=list)
   image_paths: List[str] = field(init=False, default_factory=list)
   # Metadata from Mediawiki XML export.
   timestamp: Optional[str] = field(init=False, default="")
   contributor: Optional[str] = field(init=False, default="")
-  wiki_name: Optional[str] = field(init=False, default=None)
+  wiki_name: Optional[Wikiname] = field(init=False, default=None)
   slug_with_diacritics: Optional[str] = field(init=False, default=None)
 
   def ToString(self) -> str:
@@ -116,7 +99,7 @@ class MediawikiPage:
 class Document:
   """Represents a Markdown document."""
   content: str
-  path: str
+  path: pathlib.Path
   mp: Optional[MediawikiPage]
   fm: FrontMatter = field(init=False, default_factory=lambda: FrontMatter("", ""))
 
@@ -128,35 +111,53 @@ class Document:
     self.fm = self.MakeFrontMatter()
 
   def TryToFixWikilinks(self,
-                        by_path: Dict[str, 'Document'],
-                        redirects: Dict[str, str]) -> 'Document':
+                        by_path: Dict[pathlib.Path, 'Document'],
+                        by_wikiname: Dict[Wikiname, 'Document'],
+                        redirects: Dict[Wikiname, Wikiname]) -> 'Document':
     """When the target file does not exist on disk, don't sub."""
     # Pattern matching the destination.
     dest_pattern = '[^\s]+'
     anchor_pat = '\[(?P<anchor>[^\]]+)\]'
     identify_pat = anchor_pat + '\((?P<dest>[^\s]+) "wikilink"\)'
-    def repl(m) -> str:
-      dest = m['dest']
+    def repl(m: Optional[re.Match[str]]) -> str:
+      if m is None:
+        # re.sub seems to declare that this function is called with
+        # Optional[Match], but I think in practice this function only gets
+        # called when there's a match. So the below line should never execute.
+        raise ValueError("called with a None, this should not happen")
+      dest = Wikiname(m['dest'])
       anchor = m['anchor']
       # We've found a destination, does it exist on disk?
       # Desperate measures here. I wanted this to not do I/O.
       # This is also not configured correctly and won't work on anyone else's
       # setup.
-      doc_dir, _ = os.path.split(self.path)
-      dest_path = os.path.join(doc_dir, dest + ".md")
+      doc_dir = pathlib.Path(self.path.parts[0])
+      dest_path = doc_dir.joinpath(pathlib.Path(dest + ".md"))
       def annotate_invalid(s: str, reason: str) -> str:
-        logging.info("Could not fix link [%r](%r) in %r: %s", anchor, dest,
+        logging.info("Unable to fix link [%r](%r) in %r: %s", anchor, dest,
                      self.path, reason)
         return f"{s}<!-- link nie odnosił się do niczego: {reason} -->"
-      def ResolveRedirect(p: str) -> Optional[Document]:
-        doc = None
-        while p in redirects and redirects[p] in by_path:
-          doc = by_path[redirects[p]]
-          p = doc.path
+      def RedirectExists(wikiname: Wikiname) -> bool:
+        wikiname_title = Wikiname(wikiname.title())
+        return wikiname_title in redirects and redirects[wikiname_title] in by_wikiname
+      def ResolveRedirect(p: pathlib.Path) -> Optional[Document]:
+        logging.debug("ResolveRedirect(%r)", p)
+        doc: Optional[Document] = None
+        wikiname: Wikiname = WikinameFromPath(p)
+        wikiname = Wikiname(wikiname.capitalize())
+        visited: Set[Wikiname] = set()
+        while RedirectExists(wikiname):
+          assert wikiname not in visited, (
+            f"Redirect loop for {wikiname}, visited: {visited}")
+          visited.add(wikiname)
+          wikiname = Wikiname(redirects[wikiname].capitalize())
+          doc = by_wikiname[wikiname]
         return doc
       target_doc = ResolveRedirect(dest_path)
+      dest_ref: str
+      dest_wikiname: Wikiname = Wikiname(dest.title())
       if target_doc is not None:
-        dest_name = target_doc.fm.title.replace(' ', '_')
+        dest_ref = target_doc.fm.title.replace(' ', '_') + '.md'
       elif dest_path in by_path and by_path[dest_path].GetRedirect():
         target_doc = by_path[dest_path]
         after_redirection = ResolveRedirect(target_doc.path)
@@ -166,10 +167,13 @@ class Document:
           return annotate_invalid(anchor, msg)
         else:
           target_doc = after_redirection
-          dest_name = target_doc.fm.title.replace(' ', '_') + '.md'
+          dest_ref = target_doc.path.parts[-1]
       elif dest_path in by_path:
         target_doc = by_path[dest_path]
-        dest_name = target_doc.fm.title.replace(' ', '_') + '.md'
+        dest_ref = target_doc.path.parts[-1]
+      elif Wikiname(dest_wikiname) in by_wikiname:
+        target_doc = by_wikiname[dest_wikiname]
+        dest_ref = target_doc.path.parts[-1]
       elif re.match(':'+CATEGORY_TAG+':', dest, flags=re.IGNORECASE):
         m = re.search(':'+CATEGORY_TAG+':(?P<category>.*):?', dest, re.IGNORECASE)
         if m is None:
@@ -183,7 +187,7 @@ class Document:
         msg = ("%r (%r) links to %r (%r) and that does not exist" % (
           self.fm.title, self.path, dest, dest_path))
         return annotate_invalid(anchor, msg)
-      return '[%s]({{< relref "%s" >}})' % (anchor, dest_name)
+      return '[%s]({{< relref "%s" >}})' % (anchor, dest_ref)
     return Document(re.sub(identify_pat, repl, self.content),
                     self.path, self.mp)
 
@@ -227,12 +231,12 @@ class Document:
           state = _outside
     return Document('\n'.join(result) + '\n', self.path, self.mp)
 
-  def GetRedirect(self) -> Optional[str]:
+  def GetRedirect(self) -> Optional[Wikiname]:
     """If the document is a redirection, return the destination wiki name."""
     anchor_pat = '\[(?P<anchor>[^\]]+)\]'
     redir_pat = 'REDIRECT\\s+' + anchor_pat + '\((?P<dest>[^\s]+) "wikilink"\)'
     m = re.search(redir_pat, self.content)
-    return m['dest'] if m else None
+    return Wikiname(m['dest']) if m else None
 
   def MakeFrontMatter(self) -> FrontMatter:
     title = TitleFromPath(self.path)
@@ -248,7 +252,7 @@ class Document:
     # https://serverfault.com/questions/1076344/temporary-redirects-302-307-on-a-static-site-frequently-updated
     bald_slug = Slugify(unidecode.unidecode(title))
     fm = FrontMatter(title=title, slug=bald_slug)
-    fm.wiki_name = fm.title.replace(" ", "_")
+    fm.wiki_name = Wikiname(fm.title.replace(" ", "_"))
     fm.slug_with_diacritics = Slugify(title)
     # ast.walker seems to visit some nodes more than once.
     # This is surprising.
@@ -302,14 +306,12 @@ class Document:
     could take the Hugo config and work off of that, but... it's too complex for
     me to implement to fix like 5 URLs.
     """
-    segments = self.path.split("/")
-    assert segments[0] == 'content'
-    segments = segments[1:]  # drop "content/"
+    segments = self.path.parts
     if len(segments) > 1:
       segments = segments[:1]  # only 1 URL depth
     else:
       segments = []
-    return "/" + "/".join(segments + [self.fm.slug])
+    return "/" + "/".join(itertools.chain(segments, [self.fm.slug]))
 
 
 def Slugify(s: str) -> str:
@@ -319,10 +321,11 @@ def Slugify(s: str) -> str:
   return ("-".join(segments)).strip('-')
 
 
-def DocumentFromPath(path: str, existing_paths: Set[str],
+def DocumentFromPath(root_dir: pathlib.Path, path: pathlib.Path, existing_paths:
+                     Set[pathlib.Path],
                      data_from_xml: Dict[str, MediawikiPage]) -> Optional[Document]:
   # First things first, let's check if we're even going to try.
-  with open(path, "rb") as fd:
+  with open(os.path.join(root_dir, path), "rb") as fd:
     content_bytes = fd.read()
   markdown_text = content_bytes.decode("utf-8")
   for fm_delimiter in ('---', '+++', '{'):
@@ -340,38 +343,51 @@ def DocumentFromPath(path: str, existing_paths: Set[str],
   return Document(markdown_text, path, mp)
 
 
-def WriteContent(content: str, path: str) -> None:
-  backup_path = path + BACKUP_EXT
-  if os.path.exists(backup_path):
-    logging.warning("Won't write %r, because %r already exists",
-                path, backup_path)
+def WriteContent(content: str, path: str, dry_run: bool) -> None:
   # Let's not destroy people's work.
-  shutil.copy(path, backup_path)
-  with open(path, "wb") as fd:
-    fd.write(content.encode("utf-8"))
+  if os.path.exists(path):
+    logging.warning("Won't write to %r (already exists)", path)
+    return
+
+  if not dry_run:
+    with open(path, "wb") as fd:
+      fd.write(content.encode("utf-8"))
+  else:
+    logging.info("[dry run] Would write to %r", path)
 
 
-def MarkdownPaths(dirname: str) -> Tuple[Set[str], Set[str]]:
+def MarkdownPaths(dirname: str) -> Set[pathlib.Path]:
+  """Return the list of files relative to the source directory."""
   file_list = set()
-  backup_file_list = set()
   for root, dirs, files in os.walk(dirname):
     for f in files:
-      fullpath = os.path.join(root, f)
+      fullpath = pathlib.Path(os.path.join(root, f))
+      relpath = fullpath.relative_to(dirname)
       if f.endswith('.md'):
-        file_list.add(fullpath)
-      if f.endswith('.md' + BACKUP_EXT):
-        backup_file_list.add(fullpath)
-  return file_list, backup_file_list
+        file_list.add(relpath)
+  return file_list
 
 
-def DocumentsByPath(documents: Iterable[Document]) -> Dict[str, Document]:
-  by_path: Dict[str, Document] = {}
+def DocumentsByPath(documents: Iterable[Document]) -> Dict[pathlib.Path, Document]:
+  by_path: Dict[pathlib.Path, Document] = {}
   for doc in documents:
     assert doc.path not in by_path
     by_path[doc.path] = doc
-    if doc.path.lower() not in by_path:
-      by_path[doc.path.lower()] = doc
+    # For compatibility with Mediawiki, we're considering paths
+    # case-insensitive.
+    path_lower = pathlib.Path(str(doc.path).lower())
+    if path_lower not in by_path:
+      by_path[path_lower] = doc
   return by_path
+
+
+def DocumentsByWikiname(documents: Iterable[Document]) -> Dict[Wikiname, Document]:
+  by_wikiname: Dict[Wikiname, Document] = {}
+  for d in documents:
+    if d.fm.wiki_name is None:
+      continue
+    by_wikiname[Wikiname(d.fm.wiki_name.title())] = d
+  return by_wikiname
 
 
 def _isNoteName(s: str) -> bool:
@@ -383,10 +399,12 @@ def _isNoteName(s: str) -> bool:
   notes = set(itertools.chain(letters, with_flat, with_sharp))
   return s in notes
 
-def TitleFromPath(path: str) -> str:
-  """Derive the title from path.
+
+def WikinameFromPath(path: pathlib.Path) -> Wikiname:
+  """Derive the Wikiname from path.
 
   content/książka/Foo.md => Foo
+  content/książka/Foo_Bar.md => 'Foo_Bar'
 
   Also support chord names with slashes:
 
@@ -401,15 +419,37 @@ def TitleFromPath(path: str) -> str:
     use_for_title = parts[-2] + '/' + parts[-1]
   else:
     use_for_title = parts[-1]
-  return use_for_title.replace("_", " ")
+  return Wikiname(use_for_title)
+
+def TitleFromPath(path: pathlib.Path) -> str:
+  """Similar from Wikiname, but with spaces."""
+  return str(WikinameFromPath(path)).replace("_", " ")
+
+
+def ValidateDirectories(dir1: str, dir2: str) -> bool:
+  """Return true when both directories exist and are different.
+
+  Following the footsteps of giants, here's a quote from `rm` from Illumos:
+    https://github.com/illumos/illumos-gate/blob/9ecd05bdc59e4a1091c51ce68cce2028d5ba6fd1/usr/src/cmd/rm/rm.c#L446-L448
+  """
+  try:
+    st1 = os.stat(dir1)
+    st2 = os.stat(dir2)
+  except FileNotFoundError as e:
+    raise FileNotFoundError(
+      f"Please sure both directories exist: {dir1!r}, {dir2!r}") from e
+  return st1.st_dev == st2.st_dev and st1.st_ino == st2.st_ino
 
 
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(
       description="Convert markdown from mediawiki-to-gfm to hugo.")
   parser.add_argument(
-      "content_directory", metavar="PATH",
-      help="Content directory, usually named 'content'.")
+    "source_directory", metavar="SRC_PATH",
+    help="Source directory, same layout as 'content'.")
+  parser.add_argument(
+    "content_directory", metavar="DST_PATH",
+    help="Content directory, usually named 'content'.")
   parser.add_argument(
     "--category-tag", metavar="TAG", default="Category",
     help="Name of the Category tag in Mediawiki. This tends to be "
@@ -419,18 +459,35 @@ if __name__ == '__main__':
     "--image-tag", metavar="TAG", default="File",
     help="Name of the Image tag in Mediawiki.")
   parser.add_argument(
-    "--xml-data", metavar="PATH", default=None,
+    "--xml-data", metavar="XML_PATH", default=None,
     help="Path to the XML export from Mediawiki")
+  parser.add_argument('--dry_run', default=False, action='store_true',
+                      help="Don't make changes on the filesystem")
   args = parser.parse_args()
+  ValidateDirectories(args.source_directory, args.content_directory)
   CATEGORY_TAG = args.category_tag
   IMAGE_TAG = args.image_tag
-  logging.basicConfig(level=logging.INFO)
+  logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)-8s %(filename)s:%(lineno)d - %(message)s')
   # TODO: Make this script work from other locations tool.
   assert args.content_directory == 'content', (
     "You need to be in Hugo root and use the argument 'content', e.g. "
     "python3 utils/mediawiki_markdown_to_hugo.py content"
   )
-  markdown_paths, backup_paths = MarkdownPaths(args.content_directory)
+
+  # To avoid funky path manipulation, it would be easy to os.chdir into the
+  # source directory, read, then os.chdir into the target directory and write.
+  # But I'm under the impression that going back to the original directory is
+  # not trivial, because I'd have to translate the path to the absolute path,
+  # and it feels messy. So I guess I'll have to do it differently, by tracking
+  # file paths starting from the source directory.
+  markdown_paths = MarkdownPaths(args.source_directory)
+  if not markdown_paths:
+    raise Exception(
+      f"Could not find any *.md files in {args.source_directory!r}")
+  logging.info("Found %d markdown paths, for example %s", len(markdown_paths),
+               next(iter(markdown_paths)))
 
   data_from_xml: Dict[str, MediawikiPage] = {}
   # Why can't I get it from the XML itself?
@@ -454,28 +511,19 @@ if __name__ == '__main__':
       except ValueError:
         pass
 
-  for backup_path in backup_paths:
-    logging.debug("Backup file %s already exists; Restoring it automatially",
-                  backup_path)
-    path: str = re.sub(re.escape(BACKUP_EXT)+'$', '', backup_path)
-    shutil.move(backup_path, path)
-
-  # Let's verify that backups have been restored.
-  markdown_paths, backup_paths = MarkdownPaths(args.content_directory)
-  assert not backup_paths
-
-  documents: Dict[str, Document] = {}
+  documents: Dict[Wikiname, Document] = {}
   for path in markdown_paths:
-    doc = DocumentFromPath(path, markdown_paths, data_from_xml)
+    doc = DocumentFromPath(args.source_directory, path, markdown_paths, data_from_xml)
     if doc is None:
       continue
     wiki_name = doc.fm.wiki_name
     assert wiki_name not in documents, (
       f"Page {wiki_name!r} ({doc.path}) is already in documents: "
       f"{documents[wiki_name].path}")
-    documents[wiki_name] = doc
+    if wiki_name is not None:
+      documents[wiki_name] = doc
 
-  redirects: Dict[str, str] = {}
+  redirects: Dict[Wikiname, Wikiname] = {}
   # Need to find the redirects, and assign aliases.
   for wiki_name, doc in documents.items():
     if doc.fm.redirect is None:
@@ -484,9 +532,12 @@ if __name__ == '__main__':
       target_doc = documents[doc.fm.redirect]
       target_doc.fm.aliases.append(doc.URLPath())
       # The target in the dictionary should be the path of the .md file.
-      doc_dir, _ = os.path.split(doc.path)
-      dest_path = os.path.join(doc_dir, doc.fm.redirect + ".md")
-      redirects[doc.path] = dest_path
+      doc_dir: pathlib.Path = pathlib.Path(doc.path.parts[0]) if len(doc.path.parts) > 1 else pathlib.Path('.')
+      dest_path = doc_dir.joinpath(pathlib.Path(doc.fm.redirect + ".md"))
+      if doc.fm.wiki_name is not None:
+        redirects[Wikiname(doc.fm.wiki_name.capitalize())] = doc.fm.redirect
+      else:
+        ValueError(r"{doc.path!r} is a redirect but has no wiki name")
     elif re.match(':'+CATEGORY_TAG+':', doc.fm.redirect,
                      flags=re.IGNORECASE):
       # TODO: A redirection to a category page.
@@ -494,18 +545,19 @@ if __name__ == '__main__':
     else:
       logging.warning(f"Bad redirect: {doc.fm.redirect!r}")
 
-  by_path: Dict[str, Document] = DocumentsByPath(documents.values())
+  by_path: Dict[pathlib.Path, Document] = DocumentsByPath(documents.values())
+  by_wikiname: Dict[Wikiname, Document] = DocumentsByWikiname(documents.values())
 
   for doc in documents.values():
+    if doc.fm.redirect is not None:
+      logging.info("Not writing %r because it's a redirect to %r", doc.path,
+                   doc.fm.redirect)
+      continue
     updated_content: str = doc.fm.ToString() + (doc.RemoveCategoryLinks()
                           .HandleImageTags()
-                          .TryToFixWikilinks(by_path, redirects)
+                          .TryToFixWikilinks(by_path, by_wikiname, redirects)
                           .FixMonospace()
                           .content)
 
-    WriteContent(updated_content, doc.path)
-
-  for doc in documents.values():
-    if doc.fm.redirect:
-      logging.info("Unlinking %r because it's a redirection to %r", doc.path,
-                   doc.fm.redirect)
+    WriteContent(updated_content, os.path.join(args.content_directory, doc.path),
+                 args.dry_run)

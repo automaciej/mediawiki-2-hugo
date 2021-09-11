@@ -1,5 +1,9 @@
-import unittest
 import mediawiki_markdown_to_hugo as m
+
+import logging
+import unittest
+
+from pathlib import Path
 
 TEST_ARTICLE_1 = """
 word
@@ -43,7 +47,8 @@ W tym rozdziale umieszczę trzy bardzo ważne elementy artykulacji:
 class ConversionTest(unittest.TestCase):
 
   def testBasicStuff(self):
-    doc = m.Document(TEST_ARTICLE_1, "content/bar/Test_Article_1.md", None)
+    doc = m.Document(TEST_ARTICLE_1,
+                     Path("bar/Test_Article_1.md"), None)
     self.assertEqual("/bar/test-article-1", doc.URLPath())
     fm = doc.fm
     self.assertEqual(fm.title, "Test Article 1")
@@ -60,10 +65,10 @@ class ConversionTest(unittest.TestCase):
       m.TitleFromPath("content/Szła_dzieweczka_do_laseczka.md"))
 
   def testTitleFromPathWithSlash(self):
-    self.assertEqual("F7/C", m.TitleFromPath("content/książka/F7/C.md"))
+    self.assertEqual("F7/C", m.TitleFromPath(Path("content/książka/F7/C.md")))
 
   def testTitleFromPathWithSlashNoSubdir(self):
-    self.assertEqual("F7/C", m.TitleFromPath("content/F7/C.md"))
+    self.assertEqual("F7/C", m.TitleFromPath(Path("content/F7/C.md")))
 
   def testIsNoteName(self):
     self.assertTrue(m._isNoteName('C'))
@@ -139,50 +144,85 @@ images:
 
   def testWikilinks(self):
     redirects = {}
-    dest_doc = m.Document("", "content/książka/Modulatory_i_filtry_dźwięku.md",
-                         None)
+    dest_doc = m.Document(
+      "dest doc", Path("książka/Modulatory_i_filtry_dźwięku.md"), None)
     doc = m.Document('3.  [Modulatory i filtry dźwięku]'
                      '(Modulatory_i_filtry_dźwięku "wikilink")',
-                     'content/książka/foo.md', None)
+                     Path('książka/foo.md'), None)
     by_path = {m.path: m for m in (dest_doc, doc)}
+    by_wikiname = {m.fm.wiki_name: m for m in (dest_doc, doc)}
     dst = ('3.  [Modulatory i filtry dźwięku]'
           '({{< relref "Modulatory_i_filtry_dźwięku.md" >}})')
-    self.assertEqual(dst, doc.TryToFixWikilinks(by_path, redirects).content)
+    self.assertEqual(dst, doc.TryToFixWikilinks(by_path, by_wikiname, redirects).content)
 
   def testWikilinksParen(self):
     redirects = {}
     dest_doc = m.Document(
-      "", "content/książka/Bossa_Nova_\\(akompaniament\\).md", None)
-    doc = m.Document('[Coś tam (akompaniament)](Bossa_Nova_\(akompaniament\) '
-                     '"wikilink")', 'content/książka/foo.md', None)
-    by_path = {m.path: m for m in (dest_doc, doc)}
+      "", Path("content/książka/Bossa_Nova_(akompaniament).md"), None)
+    doc = m.Document('[Coś tam (akompaniament)](Bossa_Nova_(akompaniament) '
+                     '"wikilink")', Path('content/książka/foo.md'), None)
+    docs = (dest_doc, doc)
+    by_path = m.DocumentsByPath(docs)
+    by_wikiname = m.DocumentsByWikiname(docs)
     dst = ('[Coś tam (akompaniament)]'
-           '({{< relref "Bossa_Nova_\(akompaniament\).md" >}})')
-    self.assertEqual(dst, doc.TryToFixWikilinks(by_path, redirects).content)
+           '({{< relref "Bossa_Nova_(akompaniament).md" >}})')
+    self.assertEqual(dst, doc.TryToFixWikilinks(by_path, by_wikiname, redirects).content)
 
   def testWikilinksCategory(self):
     m.CATEGORY_TAG = "kategoria"
     redirects = {}
     dest_doc = m.Document(
-      "", "content/książka/Bossa_Nova_\\(akompaniament\\).md")
+      "", Path("content/książka/Bossa_Nova_\\(akompaniament\\).md"), None)
     doc = m.Document('[some anchor](:Kategoria:Tabele_chwytów "wikilink") a',
-                     'content/książka/foo.md', None)
+                     Path('content/książka/foo.md'), None)
     by_path = {m.path: m for m in (dest_doc, doc)}
+    by_wikiname = m.DocumentsByWikiname((dest_doc, doc))
     dst = ('[some anchor]'
-           '(/kategorie/tabele-chwytów "Kategoria Tabele chwytów")'
+           '(/kategorie/tabele-chwytow "Kategoria Tabele chwytów")'
            ' a')
-    self.assertEqual(dst, doc.TryToFixWikilinks(by_path, redirects).content)
+    self.assertEqual(dst, doc.TryToFixWikilinks(by_path, by_wikiname, redirects).content)
 
-  def testWikilinksCategory(self):
+  def testLowercaseWikilink(self):
     m.CATEGORY_TAG = "kategoria"
     redirects = {}
     doc_akord = m.Document('O akordzie',
-                     'content/książka/Akord.md', None)
+                     Path('content/książka/Akord.md'), None)
     doc = m.Document('[akord](akord "wikilink")',
-                     'content/książka/foo.md', None)
+                     Path('content/książka/foo.md'), None)
     by_path = m.DocumentsByPath((doc_akord, doc))
+    by_wikiname = m.DocumentsByWikiname((doc_akord, doc))
     dst = ('[akord]({{< relref "Akord.md" >}})')
-    self.assertEqual(dst, doc.TryToFixWikilinks(by_path, redirects).content)
+    self.assertEqual(dst, doc.TryToFixWikilinks(by_path, by_wikiname, redirects).content)
+
+  def testSingleRedirect(self):
+    m.CATEGORY_TAG = "kategoria"
+    redirects = {m.Wikiname('Akord'): m.Wikiname('Bakord')}
+    doc_akord = m.Document('O akordzie',
+                     Path('książka/Bakord.md'), None)
+    doc = m.Document('[akord](akord "wikilink")',
+                     Path('książka/foo.md'), None)
+    by_path = m.DocumentsByPath((doc_akord, doc))
+    by_wikiname = {m.fm.wiki_name: m for m in (doc_akord, doc)}
+    dst = ('[akord]({{< relref "Bakord.md" >}})')
+    self.assertEqual(dst, doc.TryToFixWikilinks(by_path, by_wikiname, redirects).content)
+
+  def testDoubleRedirect(self):
+    m.CATEGORY_TAG = "kategoria"
+    redirects = {
+      m.Wikiname('Akord'): m.Wikiname('Bakord'),
+      m.Wikiname('Bakord'): m.Wikiname('Cakord'),
+    }
+    doc_akord_1 = m.Document('O akordzie',
+                     Path('content/książka/Bakord.md'), None)
+    doc_akord_2 = m.Document('O akordzie',
+                     Path('content/książka/Cakord.md'), None)
+    doc = m.Document('[akord](akord "wikilink")',
+                     Path('content/książka/foo.md'), None)
+    docs = (doc_akord_1, doc_akord_2, doc)
+    by_path = m.DocumentsByPath(docs)
+    by_wikiname = {m.fm.wiki_name: m for m in (docs)}
+    dst = ('[akord]({{< relref "Cakord.md" >}})')
+    self.assertEqual(dst, doc.TryToFixWikilinks(by_path, by_wikiname, redirects).content)
 
   def testWikilinksCategoryWithSpaces(self):
     m.CATEGORY_TAG = "kategoria"
@@ -208,19 +248,19 @@ images:
   def testRedirection(self):
     doc = m.Document(
       '1.  REDIRECT [Regulacja gryfu](Regulacja_gryfu "wikilink")',
-      'foo/bar.md', None)
+      Path('foo/bar.md'), None)
     self.assertEqual("Regulacja_gryfu" , doc.GetRedirect())
 
   def testRedirectionStruna(self):
     doc = m.Document(
       '1.  REDIRECT [Struna](Struna "wikilink")',
-      'foo/bar.md', None)
+      Path('foo/bar.md'), None)
     self.assertEqual("Struna", doc.GetRedirect())
 
   def testURLPathTopLevel(self):
     doc = m.Document(
       '1.  REDIRECT [C9sus](C9sus "wikilink")',
-      'content/foo.md', None)
+      Path('foo.md'), None)
     self.assertEqual("C9sus", doc.GetRedirect())
     self.assertEqual("foo", doc.fm.slug)
     self.assertEqual("/foo", doc.URLPath())
@@ -228,7 +268,7 @@ images:
   def testURLPathWithSlash(self):
     doc = m.Document(
       '1.  REDIRECT [C9sus](C9sus "wikilink")',
-      'content/książka/B♭/C.md', None)
+      Path('książka/B♭/C.md'), None)
     self.assertEqual("C9sus", doc.GetRedirect())
     self.assertEqual("b-c", doc.fm.slug)
     self.assertEqual("/książka/b-c", doc.URLPath())
@@ -237,7 +277,7 @@ images:
     m.IMAGE_TAG = 'grafika'
     doc = m.Document(
       '[thumb](Grafika:MarekBlizinskiPozycja.jpg "wikilink") - postawa z',
-      'foo/bar.md', None)
+      Path('foo/bar.md'), None)
     self.assertEqual(
       '{{< figure src="/images/MarekBlizinskiPozycja.jpg" >}} - postawa z',
       doc.HandleImageTags().content)
@@ -246,7 +286,7 @@ images:
     m.IMAGE_TAG = 'grafika'
     doc = m.Document(
       '[thumb](Grafika:plectrum1.jpg "wikilink") - postawa z',
-      'foo/bar.md', None)
+      Path('foo/bar.md'), None)
     self.assertEqual('{{< figure src="/images/Plectrum1.jpg" >}} - postawa z',
                      doc.HandleImageTags().content)
 
@@ -279,4 +319,5 @@ images:
 
 
 if __name__ == '__main__':
+  logging.basicConfig(level=logging.INFO)
   unittest.main()
