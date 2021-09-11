@@ -276,7 +276,7 @@ images:
       '[thumb](Grafika:MarekBlizinskiPozycja.jpg "wikilink") - postawa z',
       Path('foo/bar.md'), None)
     self.assertEqual(
-      '{{< figure src="/images/MarekBlizinskiPozycja.jpg" >}} - postawa z',
+      '{{< image src="/images/MarekBlizinskiPozycja.jpg" >}} - postawa z',
       doc.HandleImageTags().content)
 
   def testHandleImageTagsLowercase(self):
@@ -284,7 +284,7 @@ images:
     doc = m.Document(
       '[thumb](Grafika:plectrum1.jpg "wikilink") - postawa z',
       Path('foo/bar.md'), None)
-    self.assertEqual('{{< figure src="/images/Plectrum1.jpg" >}} - postawa z',
+    self.assertEqual('{{< image src="/images/Plectrum1.jpg" >}} - postawa z',
                      doc.HandleImageTags().content)
 
   def testHandleImageTagsMultiline(self):
@@ -294,7 +294,7 @@ images:
       'foo/bar.md', None)
     self.assertEqual(["/images/MarekBlizinskiPozycja.jpg"], doc.fm.image_paths)
     self.assertEqual(
-      '{{< figure src="/images/MarekBlizinskiPozycja.jpg" >}} - postawa z',
+      '{{< image src="/images/MarekBlizinskiPozycja.jpg" >}} - postawa z',
       doc.HandleImageTags().content)
 
   def testHandleImageTagsMultipleImages(self):

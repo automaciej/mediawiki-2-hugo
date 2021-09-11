@@ -204,7 +204,7 @@ class Document:
       # Image path is always capitalized in MediaWiki, and works even if you
       # don't capitalize it in page text.
       image_path = "/images/" + m.group(1)[0].upper() + m.group(1)[1:]
-      return '{{< figure src="' + image_path + '" >}}'
+      return '{{< image src="' + image_path + '" >}}'
 
     return Document(re.sub(image_pattern, repl, self.content, flags=re.IGNORECASE),
                     self.path, self.mp)
