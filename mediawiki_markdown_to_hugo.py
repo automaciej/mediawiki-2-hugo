@@ -126,14 +126,15 @@ class Document:
         # Optional[Match], but I think in practice this function only gets
         # called when there's a match. So the below line should never execute.
         raise ValueError("called with a None, this should not happen")
-      dest = Wikiname(m['dest'])
-      anchor = m['anchor']
+      dest = m['dest']
+      dest_wikiname = Wikiname(m['dest'].title())
+      anchor: str = m['anchor']
       # We've found a destination, does it exist on disk?
-      # Desperate measures here. I wanted this to not do I/O.
-      # This is also not configured correctly and won't work on anyone else's
-      # setup.
-      doc_dir = pathlib.Path(self.path.parts[0])
-      dest_path = doc_dir.joinpath(pathlib.Path(dest + ".md"))
+      if dest_wikiname in by_wikiname:
+        dest_path: pathlib.Path = by_wikiname[dest_wikiname].path
+      else:
+        # This is the case with categories for example.
+        dest_path = pathlib.Path('/invalid/path')
       def annotate_invalid(s: str, reason: str) -> str:
         logging.info("Unable to fix link [%r](%r) in %r: %s", anchor, dest,
                      self.path, reason)
@@ -145,18 +146,17 @@ class Document:
         logging.debug("ResolveRedirect(%r)", p)
         doc: Optional[Document] = None
         wikiname: Wikiname = WikinameFromPath(p)
-        wikiname = Wikiname(wikiname.capitalize())
+        wikiname = Wikiname(wikiname.title())
         visited: Set[Wikiname] = set()
         while RedirectExists(wikiname):
           assert wikiname not in visited, (
             f"Redirect loop for {wikiname}, visited: {visited}")
           visited.add(wikiname)
-          wikiname = Wikiname(redirects[wikiname].capitalize())
+          wikiname = Wikiname(redirects[wikiname].title())
           doc = by_wikiname[wikiname]
         return doc
       target_doc = ResolveRedirect(dest_path)
       dest_ref: str
-      dest_wikiname: Wikiname = Wikiname(dest.title())
       if target_doc is not None:
         dest_ref = target_doc.fm.title.replace(' ', '_') + '.md'
       elif dest_path in by_path and by_path[dest_path].GetRedirect():
@@ -424,7 +424,7 @@ def WikinameFromPath(path: pathlib.Path) -> Wikiname:
   parts = no_ext.split("/")
   # Special case for chords.
   collapse_last_slash = _isNoteName(parts[-1])
-  if collapse_last_slash:
+  if collapse_last_slash and len(parts) >= 2:
     use_for_title = parts[-2] + '/' + parts[-1]
   else:
     use_for_title = parts[-1]
@@ -544,7 +544,7 @@ if __name__ == '__main__':
       doc_dir: pathlib.Path = pathlib.Path(doc.path.parts[0]) if len(doc.path.parts) > 1 else pathlib.Path('.')
       dest_path = doc_dir.joinpath(pathlib.Path(doc.fm.redirect + ".md"))
       if doc.fm.wiki_name is not None:
-        redirects[Wikiname(doc.fm.wiki_name.capitalize())] = doc.fm.redirect
+        redirects[Wikiname(doc.fm.wiki_name.title())] = doc.fm.redirect
       else:
         ValueError(r"{doc.path!r} is a redirect but has no wiki name")
     elif re.match(':'+CATEGORY_TAG+':', doc.fm.redirect,

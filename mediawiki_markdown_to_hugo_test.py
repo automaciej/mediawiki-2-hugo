@@ -149,8 +149,9 @@ images:
     doc = m.Document('3.  [Modulatory i filtry dźwięku]'
                      '(Modulatory_i_filtry_dźwięku "wikilink")',
                      Path('książka/foo.md'), None)
-    by_path = {m.path: m for m in (dest_doc, doc)}
-    by_wikiname = {m.fm.wiki_name: m for m in (dest_doc, doc)}
+    docs = (dest_doc, doc)
+    by_path = m.DocumentsByPath(docs)
+    by_wikiname = m.DocumentsByWikiname(docs)
     dst = ('3.  [Modulatory i filtry dźwięku]'
           '({{< relref "Modulatory_i_filtry_dźwięku.md" >}})')
     self.assertEqual(dst, doc.TryToFixWikilinks(by_path, by_wikiname, redirects).content)
@@ -197,30 +198,26 @@ images:
   def testSingleRedirect(self):
     m.CATEGORY_TAG = "kategoria"
     redirects = {m.Wikiname('Akord'): m.Wikiname('Bakord')}
-    doc_akord = m.Document('O akordzie',
-                     Path('książka/Bakord.md'), None)
-    doc = m.Document('[akord](akord "wikilink")',
-                     Path('książka/foo.md'), None)
-    by_path = m.DocumentsByPath((doc_akord, doc))
-    by_wikiname = {m.fm.wiki_name: m for m in (doc_akord, doc)}
+    doc_akord = m.Document('', Path('książka/Akord.md'), None)
+    doc_bakord = m.Document('O akordzie', Path('książka/Bakord.md'), None)
+    doc = m.Document('[akord](akord "wikilink")', Path('książka/foo.md'), None)
+    docs = (doc_akord, doc_bakord, doc)
+    by_path = m.DocumentsByPath(docs)
+    by_wikiname = m.DocumentsByWikiname(docs)
     dst = ('[akord]({{< relref "Bakord.md" >}})')
     self.assertEqual(dst, doc.TryToFixWikilinks(by_path, by_wikiname, redirects).content)
 
   def testDoubleRedirect(self):
     m.CATEGORY_TAG = "kategoria"
-    redirects = {
-      m.Wikiname('Akord'): m.Wikiname('Bakord'),
-      m.Wikiname('Bakord'): m.Wikiname('Cakord'),
-    }
-    doc_akord_1 = m.Document('O akordzie',
-                     Path('content/książka/Bakord.md'), None)
-    doc_akord_2 = m.Document('O akordzie',
-                     Path('content/książka/Cakord.md'), None)
-    doc = m.Document('[akord](akord "wikilink")',
-                     Path('content/książka/foo.md'), None)
-    docs = (doc_akord_1, doc_akord_2, doc)
+    redirect_untyped = (('Akord', 'Bakord'), ('Bakord', 'Cakord'))
+    redirects = {m.Wikiname(a): m.Wikiname(b) for a, b in redirect_untyped}
+    doc_akord_0 = m.Document('', Path('content/książka/Akord.md'), None)
+    doc_akord_1 = m.Document('', Path('content/książka/Bakord.md'), None)
+    doc_akord_2 = m.Document('O akordzie', Path('content/książka/Cakord.md'), None)
+    doc = m.Document('[akord](akord "wikilink")', Path('content/książka/foo.md'), None)
+    docs = (doc_akord_0, doc_akord_1, doc_akord_2, doc)
     by_path = m.DocumentsByPath(docs)
-    by_wikiname = {m.fm.wiki_name: m for m in (docs)}
+    by_wikiname = m.DocumentsByWikiname(docs)
     dst = ('[akord]({{< relref "Cakord.md" >}})')
     self.assertEqual(dst, doc.TryToFixWikilinks(by_path, by_wikiname, redirects).content)
 
