@@ -144,7 +144,8 @@ class FrontMatterTest(unittest.TestCase):
     content = (
       '[thumb\nnail](Grafika:MarekBlizinskiPozycja.jpg "wikilink") - postawa z')
     doc = m.Document(content, Path('foo/bar.md'), None)
-    self.assertEqual(["/images/MarekBlizinskiPozycja.jpg"], doc.fm.image_paths)
+    self.assertEqual(["MarekBlizinskiPozycja.jpg"],
+                     doc.fm.unverified_image_filenames)
 
   def testHandleImageTagsMultipleImages(self):
     m.IMAGE_TAG = 'grafika'
@@ -152,8 +153,9 @@ class FrontMatterTest(unittest.TestCase):
       '[thumb\nnail](Grafika:MarekBlizinskiPozycja.jpg "wikilink") - postawa z'
       '[somethingelse](Grafika:anotherImage.jpg "wikilink")',
       'foo/bar.md', None)
-    self.assertEqual(["/images/MarekBlizinskiPozycja.jpg",
-                      "/images/AnotherImage.jpg"], doc.fm.image_paths)
+    self.assertEqual(["MarekBlizinskiPozycja.jpg",
+                      "AnotherImage.jpg"],
+                     doc.fm.unverified_image_filenames)
 
   def testRenderFrontMatter(self):
     fm = m.FrontMatter(title="Test title 1", slug="test-title-1")
@@ -195,7 +197,7 @@ wikilinks: ['Another_article']
     fm = m.FrontMatter(title="Test title 1", slug="test-title-1")
     fm.wikilinks.append(m.Wikilink("Another article", "Another_article"))
     fm.categories.append("test-category")
-    fm.image_paths = ["img1", "img2"]
+    fm.unverified_image_filenames = ["img1", "img2"]
     expected = """---
 title: "Test title 1"
 slug: "test-title-1"
@@ -204,8 +206,8 @@ kategorie: ['test-category']
 draft: false
 wikilinks: ['Another_article']
 images:
-  - path: "img1"
-  - path: "img2"
+  - path: "/images/img1"
+  - path: "/images/img2"
 ---
 """
     self.assertEqual(expected, fm.ToString())
@@ -222,14 +224,17 @@ class TestData:
 class WikilinksTest(unittest.TestCase):
 
   def docOnSite(self, doc: m.Document, other_docs: Sequence[m.Document],
-                redirects: Dict[str, str]) -> m.DocumentOnSite:
+                redirects: Dict[str, str],
+                images: Dict[Path, m.Image]=None) -> m.DocumentOnSite:
+    if images is None:
+      images = {}
     docs = list(itertools.chain([doc], other_docs))
     by_path = m.DocumentsByPath(docs)
     by_wikiname = m.DocumentsByWikiname(docs)
     redirects_wikiname = {
       m.Wikiname(key.title()): m.Wikiname(val.title())
       for key, val in redirects.items()}
-    site = m.Site(by_path, by_wikiname, redirects_wikiname, {})
+    site = m.Site(by_path, by_wikiname, redirects_wikiname, images)
     return m.DocumentOnSite(doc, site)
 
   @parameterized.expand([
@@ -324,24 +329,28 @@ class WikilinksTest(unittest.TestCase):
     (
       'simple',
       '[thumb](Grafika:MarekBlizinskiPozycja.jpg "wikilink") - postawa z',
-     '{{< image src="/images/MarekBlizinskiPozycja.jpg" >}} - postawa z',
+      [m.Image(Path('MarekBlizinskiPozycja.jpg'), 11, 12),],
+      '{{< image src="/images/MarekBlizinskiPozycja.jpg" width="11" height="12" >}} - postawa z',
     ), # parameterized test
     (
       'lowercase',
       '[thumb](Grafika:plectrum1.jpg "wikilink") - postawa z',
-      '{{< image src="/images/Plectrum1.jpg" >}} - postawa z',
+      [m.Image(Path('Plectrum1.jpg'), 11, 12),],
+      '{{< image src="/images/Plectrum1.jpg" width="11" height="12" >}} - postawa z',
     ), # parameterized test
     (
       'multiline',
       '[thumb\nnail](Grafika:MarekBlizinskiPozycja.jpg "wikilink") - postawa z',
-      '{{< image src="/images/MarekBlizinskiPozycja.jpg" >}} - postawa z',
+      [m.Image(Path('MarekBlizinskiPozycja.jpg'), 11, 12),],
+      '{{< image src="/images/MarekBlizinskiPozycja.jpg" width="11" height="12" >}} - postawa z',
     ), # parameterized test
   ])
-  def testHandleImageTags(self, name, content, want):
+  def testHandleImageTags(self, name, content, image_list, want):
     m.IMAGE_TAG = 'grafika'
+    images = {i.filename: i for i in image_list}
     doc_on_site = self.docOnSite(
       m.Document(content, Path('foo/bar.md'), None),
-      [], {})
+      [], {}, images)
     self.assertEqual(want, doc_on_site.HandleImageTags().doc.content)
 
   def testBackwardCompatibilityURL(self):

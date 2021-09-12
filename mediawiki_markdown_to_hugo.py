@@ -15,6 +15,7 @@ import itertools
 import logging
 import os
 import os.path
+import PIL.Image  # type: ignore
 import re
 import shutil
 import toml
@@ -47,7 +48,7 @@ class Wikilink:
 
 @dataclass
 class Image:
-  path: pathlib.Path
+  filename: pathlib.Path
   width: int
   height: int
 
@@ -62,7 +63,10 @@ class FrontMatter:
   wikilinks: List[Wikilink] = field(init=False, default_factory=list)
   redirect: Optional[Wikiname] = field(init=False, default=None)
   aliases: List[str] = field(init=False, default_factory=list)
-  image_paths: List[str] = field(init=False, default_factory=list)
+  # Image paths are collected from the document body.
+  unverified_image_filenames: List[str] = field(init=False, default_factory=list)
+  # Images are the validated.
+  images: List[Image] = field(init=False, default_factory=list)
   # Metadata from Mediawiki XML export.
   timestamp: Optional[str] = field(init=False, default="")
   contributor: Optional[str] = field(init=False, default="")
@@ -76,9 +80,9 @@ class FrontMatter:
       aliases_text = f"aliases: {sorted(self.aliases)}\n"
     else:
       aliases_text = ""
-    if self.image_paths:
-      image_text = "images:\n" + "\n".join([f"  - path: \"{x}\"" for x in
-                                            sorted(self.image_paths)]) + "\n"
+    if self.unverified_image_filenames:
+      image_text = "images:\n" + "\n".join([f"  - path: \"/images/{x}\"" for x in
+                                            sorted(self.unverified_image_filenames)]) + "\n"
     else:
       image_text = ""
     if self.contributor:
@@ -190,8 +194,8 @@ class Document:
     for m in re.finditer(image_pattern, self.content, flags=re.IGNORECASE):
       # Use first found image as the entry image.
       # TODO: Deduplicate the image path.
-      image_path = "/images/" + m.group(1)[0].upper() + m.group(1)[1:]
-      fm.image_paths.append(image_path)
+      image_path = m.group(1)[0].upper() + m.group(1)[1:]
+      fm.unverified_image_filenames.append(image_path)
 
     # Metadata from Mediawiki
     if self.mp:
@@ -314,8 +318,14 @@ class DocumentOnSite:
     def repl(m):
       # Image path is always capitalized in MediaWiki, and works even if you
       # don't capitalize it in page text.
-      image_path = "/images/" + m.group(1)[0].upper() + m.group(1)[1:]
-      return '{{< image src="' + image_path + '" >}}'
+      image_filename = pathlib.Path(m.group(1)[0].upper() + m.group(1)[1:])
+      image_url_path = pathlib.Path('/images').joinpath(image_filename)
+      if image_filename not in self.site.images:
+        logging.warning(f"{image_filename!r} ({self.doc.path}) not found on disk")
+        logging.info(f"self.site.images: {self.site.images}")
+        return f'`{image_filename!r}` 🖼️❓😞'
+      img = self.site.images[image_filename]
+      return f'{{{{< image src="{image_url_path}" width="{img.width}" height="{img.height}" >}}}}'
 
     doc = Document(re.sub(image_pattern, repl, self.doc.content,
                           flags=re.IGNORECASE), self.doc.path, self.doc.mp)
@@ -481,6 +491,21 @@ def ValidateDirectories(dir1: str, dir2: str) -> bool:
   return st1.st_dev == st2.st_dev and st1.st_ino == st2.st_ino
 
 
+def FindImages(path: pathlib.Path) -> Dict[pathlib.Path, Image]:
+  images: Dict[pathlib.Path, Image] = {}
+  logging.info("Reading images from %r", args.images_dir)
+  for root, dirs, files in os.walk(args.images_dir):
+    for f in files:
+      fullpath = pathlib.Path(os.path.join(root, f))
+      with PIL.Image.open(fullpath) as im:
+        images[pathlib.Path(f)] = Image(filename=pathlib.Path(f), width=im.width, height=im.height)
+  if images:
+    logging.info("Found %d images, for example %r",
+                 len(images), next(iter(images.keys())))
+  else:
+    logging.warning("Found no images.")
+  return images
+
 if __name__ == '__main__':
   parser = argparse.ArgumentParser(
       description="Convert markdown from mediawiki-to-gfm to hugo.")
@@ -498,6 +523,9 @@ if __name__ == '__main__':
   parser.add_argument(
     "--image-tag", metavar="TAG", default="File",
     help="Name of the Image tag in Mediawiki.")
+  parser.add_argument(
+    "--images-dir", metavar="IMAGES_DIR", default=None,
+    help="The directory holding all the images")
   parser.add_argument(
     "--xml-data", metavar="XML_PATH", default=None,
     help="Path to the XML export from Mediawiki")
@@ -551,6 +579,10 @@ if __name__ == '__main__':
       except ValueError:
         pass
 
+  images: Dict[pathlib.Path, Image] = {}
+  if args.images_dir is not None:
+    images = FindImages(args.images_dir)
+
   documents: Dict[Wikiname, Document] = {}
   for path in markdown_paths:
     doc = DocumentFromPath(args.source_directory, path, markdown_paths, data_from_xml)
@@ -585,7 +617,6 @@ if __name__ == '__main__':
     else:
       logging.warning(f"Bad redirect: {doc.fm.redirect!r}")
 
-  images: Dict[pathlib.Path, Image] = {}
   site = Site(by_path, by_wikiname, redirects, images)
 
   writing_result: Dict[pathlib.Path, bool] = {}
