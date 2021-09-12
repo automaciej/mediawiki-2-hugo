@@ -187,11 +187,6 @@ class Document:
       fm.date = self.mp.timestamp
       fm.contributor = self.mp.contributor
 
-    # Add a compatibility alias from the pre-2021 URL scheme.
-    # TODO: This is specific to my current migration.
-    _, basename = os.path.split(self.path)
-    url_part, _ = os.path.splitext(basename)
-    fm.aliases.append(f"/gitara/{url_part}")
     # This doesn't work because aliases also need the path. The slug is not the
     # full URL path.
     # if fm.slug_with_diacritics != fm.slug:
