@@ -271,7 +271,7 @@ class WikilinksTest(unittest.TestCase):
        [m.Document("", Path("content/książka/Bossa_Nova_\\(akompaniament\\).md"), None)],
        {},
        ('[some anchor]'
-        '(/kategorie/tabele-chwytow "Kategoria Tabele chwytów")'
+        '(/kategorie/tabele-chwytów "Kategoria Tabele chwytów")'
         ' a'),
      ), # TestData
     ), # parameterized test

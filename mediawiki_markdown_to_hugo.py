@@ -295,7 +295,7 @@ class DocumentOnSite:
           return annotate_invalid(anchor, "Could not find the category tag")
         category = m['category']
         # TODO: Customize the category URL path from "kategorie"
-        slug = Slugify(unidecode.unidecode(category))
+        slug = Slugify(category)
         return "[%s](/kategorie/%s \"Kategoria %s\")" % (
           anchor, slug, category.replace("_", " "))
       else:
