@@ -46,6 +46,13 @@ class Wikilink:
 
 
 @dataclass
+class Image:
+  path: pathlib.Path
+  width: int
+  height: int
+
+
+@dataclass
 class FrontMatter:
   title: str
   slug: str
@@ -110,6 +117,10 @@ class Document:
     # I don't think we can pass content and path to default_factory.
     # Instead we'll replace the empty FrontMatter with one with data.
     self.fm = self.MakeFrontMatter()
+
+  def WithContent(self, content: str):
+    """Returns a new Document with replaced content."""
+    return Document(content, self.path, self.mp)
 
   def URLPath(self):
     """The URL path to access this document from, for redirects.
@@ -193,11 +204,54 @@ class Document:
     #   fm.aliases.append(fm.slug_with_diacritics)
     return fm
 
-  def TryToFixWikilinks(self,
-                        by_path: Dict[pathlib.Path, 'Document'],
-                        by_wikiname: Dict[Wikiname, 'Document'],
-                        redirects: Dict[Wikiname, Wikiname]) -> 'Document':
+
+@dataclass
+class Site:
+  """Represents the website context, knows about all the pages."""
+  by_path: Dict[pathlib.Path, Document]
+  by_wikiname: Dict[Wikiname, Document]
+  redirects: Dict[Wikiname, Wikiname]
+  images: Dict[pathlib.Path, Image]
+
+  def RedirectExists(self, wikiname: Wikiname) -> bool:
+    return (wikiname in self.redirects and
+            self.redirects[wikiname] in self.by_wikiname)
+
+  def ResolvePathRedirect(self, p: pathlib.Path) -> Optional[Document]:
+    logging.debug("ResolveRedirect(%r)", p)
+    return self.ResolveRedirect(WikinameFromPath(p))
+
+  def ResolveRedirect(self, wikiname: Wikiname) -> Optional[Document]:
+    doc: Optional[Document] = None
+    visited: Set[Wikiname] = set()
+    wikiname_title = Wikiname(wikiname.title())
+    while self.RedirectExists(wikiname_title):
+      assert wikiname_title not in visited, (
+        f"Redirect loop for {wikiname}, visited: {visited}")
+      visited.add(wikiname_title)
+      logging.debug("Found a redirect from %r to %r",
+                    wikiname_title, self.redirects[wikiname_title])
+      wikiname_title = Wikiname(self.redirects[wikiname_title].title())
+      doc = self.by_wikiname[wikiname_title]
+      assert wikiname_title == doc.fm.wiki_name, (
+        f"{wikiname_title!r} != {doc.fm.wiki_name!r}")
+    if doc is not None and doc.fm.redirect is not None:
+      raise ValueError(f"Trying to redirect to a redirection")
+    return doc
+
+
+@dataclass
+class DocumentOnSite:
+  """Represents a document together with website context.
+  
+  Allows chaining calls.
+  """
+  doc: Document
+  site: Site
+
+  def TryToFixWikilinks(self) -> 'DocumentOnSite':
     """When the target file does not exist on disk, don't sub."""
+    logging.debug("TryToFixWikilinks, redirects: %r", self.site.redirects)
     # Pattern matching the destination.
     dest_pattern = '[^\s]+'
     anchor_pat = '\[(?P<anchor>[^\]]+)\]'
@@ -213,45 +267,23 @@ class Document:
       anchor: str = m['anchor']
       def annotate_invalid(s: str, reason: str) -> str:
         logging.info("Unable to fix link [%r](%r) in %r: %s", anchor, dest,
-                     self.path, reason)
+                     self.doc.path, reason)
         return f"{s}<!-- link nie odnosił się do niczego: {reason} -->"
-      def RedirectExists(wikiname: Wikiname) -> bool:
-        return wikiname in redirects and redirects[wikiname] in by_wikiname
-      def ResolvePathRedirect(p: pathlib.Path) -> Optional[Document]:
-        logging.debug("ResolveRedirect(%r)", p)
-        return ResolveRedirect(WikinameFromPath(p))
-      def ResolveRedirect(wikiname: Wikiname) -> Optional[Document]:
-        doc: Optional[Document] = None
-        visited: Set[Wikiname] = set()
-        wikiname_title = Wikiname(wikiname.title())
-        while RedirectExists(wikiname_title):
-          assert wikiname_title not in visited, (
-            f"Redirect loop for {wikiname}, visited: {visited}")
-          visited.add(wikiname_title)
-          logging.debug("Found a redirect from %r to %r",
-                        wikiname_title, redirects[wikiname_title])
-          wikiname_title = Wikiname(redirects[wikiname_title].title())
-          doc = by_wikiname[wikiname_title]
-          assert wikiname_title == doc.fm.wiki_name, (
-            f"{wikiname_title!r} != {doc.fm.wiki_name!r}")
-        if doc is not None and doc.fm.redirect is not None:
-          raise ValueError(f"Trying to redirect to a redirection")
-        return doc
       # Resolve redirections.
-      target_doc: Optional[Document] = ResolveRedirect(dest_wikiname)
+      target_doc: Optional[Document] = self.site.ResolveRedirect(dest_wikiname)
       # Categories don't have a path.
       dest_path = pathlib.Path('/no/path/exists')
       if target_doc is not None:
         dest_path = target_doc.path
-      elif dest_wikiname in by_wikiname:
-        target_doc = by_wikiname[dest_wikiname]
+      elif dest_wikiname in self.site.by_wikiname:
+        target_doc = self.site.by_wikiname[dest_wikiname]
         dest_path = target_doc.path
       dest_ref: str
       if target_doc is not None:
-        assert target_doc.path in by_path
+        assert target_doc.path in self.site.by_path
         dest_ref = target_doc.fm.title.replace(' ', '_') + '.md'
-      elif dest_path in by_path:
-        target_doc = by_path[dest_path]
+      elif dest_path in self.site.by_path:
+        target_doc = self.site.by_path[dest_path]
         dest_ref = target_doc.path.parts[-1]
       elif re.match(':'+CATEGORY_TAG+':', dest, flags=re.IGNORECASE):
         m = re.search(':'+CATEGORY_TAG+':(?P<category>.*):?', dest, re.IGNORECASE)
@@ -264,18 +296,19 @@ class Document:
           anchor, slug, category.replace("_", " "))
       else:
         msg = ("%r (%r) links to %r (%r) and that does not exist" % (
-          self.fm.title, self.path, dest, dest_path))
+          self.doc.fm.title, self.doc.path, dest, dest_path))
         return annotate_invalid(anchor, msg)
       return '[%s]({{< relref "%s" >}})' % (anchor, dest_ref)
-    return Document(re.sub(identify_pat, repl, self.content),
-                    self.path, self.mp)
+    doc = self.doc.WithContent(re.sub(identify_pat, repl, self.doc.content))
+    return DocumentOnSite(doc, self.site)
 
-  def RemoveCategoryLinks(self) -> 'Document':
+  def RemoveCategoryLinks(self) -> 'DocumentOnSite':
     pattern = '\[:?' + CATEGORY_TAG + ':[^\]]+\]\([^\)]+\)'
-    return Document(re.sub(pattern, '', self.content, flags=re.IGNORECASE),
-                    self.path, self.mp)
+    doc = Document(re.sub(pattern, '', self.doc.content, flags=re.IGNORECASE),
+                    self.doc.path, self.doc.mp)
+    return DocumentOnSite(doc, self.site)
 
-  def HandleImageTags(self) -> 'Document':
+  def HandleImageTags(self) -> 'DocumentOnSite':
     # TODO: Dedup image pattern.
     image_pattern = '\[[^\]]+\]\(' + IMAGE_TAG + ':([^\s]+)\s"wikilink"\)'
     def repl(m):
@@ -284,16 +317,17 @@ class Document:
       image_path = "/images/" + m.group(1)[0].upper() + m.group(1)[1:]
       return '{{< image src="' + image_path + '" >}}'
 
-    return Document(re.sub(image_pattern, repl, self.content, flags=re.IGNORECASE),
-                    self.path, self.mp)
+    doc = Document(re.sub(image_pattern, repl, self.doc.content,
+                          flags=re.IGNORECASE), self.doc.path, self.doc.mp)
+    return DocumentOnSite(doc, self.site)
 
-  def FixMonospace(self) -> 'Document':
+  def FixMonospace(self) -> 'DocumentOnSite':
     _outside = 0
     _inside = 1
     result = []
     state = _outside
     pattern = re.compile('^`(?P<monospace>.*)`$')
-    for line in self.content.splitlines(keepends=False):
+    for line in self.doc.content.splitlines(keepends=False):
       if state == _outside:
         m = re.match(pattern, line)
         if m is not None:
@@ -308,7 +342,8 @@ class Document:
         else:
           result.extend(['```', '', line])
           state = _outside
-    return Document('\n'.join(result) + '\n', self.path, self.mp)
+    doc = Document('\n'.join(result) + '\n', self.doc.path, self.doc.mp)
+    return DocumentOnSite(doc, self.site)
 
 
 def Slugify(s: str) -> str:
@@ -550,6 +585,8 @@ if __name__ == '__main__':
     else:
       logging.warning(f"Bad redirect: {doc.fm.redirect!r}")
 
+  images: Dict[pathlib.Path, Image] = {}
+  site = Site(by_path, by_wikiname, redirects, images)
 
   writing_result: Dict[pathlib.Path, bool] = {}
   number_files_written = 0
@@ -558,11 +595,12 @@ if __name__ == '__main__':
       logging.info("Not writing %r because it's a redirect to %r", doc.path,
                    doc.fm.redirect)
       continue
-    updated_content: str = doc.fm.ToString() + (doc.RemoveCategoryLinks()
+    ds = DocumentOnSite(doc, site)
+    updated_content: str = doc.fm.ToString() + (ds.RemoveCategoryLinks()
                           .HandleImageTags()
-                          .TryToFixWikilinks(by_path, by_wikiname, redirects)
+                          .TryToFixWikilinks()
                           .FixMonospace()
-                          .content)
+                          .doc.content)
 
     written = WriteContent(updated_content,
                            os.path.join(args.content_directory, doc.path),
